@@ -70,4 +70,4 @@ while True:
     except Exception as e:
         print(f"[ERROR] Spotify polling failed: {e}")
 
-    time.sleep(30)  # Poll every 30s to preserve e-ink
+    time.sleep(1)  # Poll every 1s to preserve e-ink
