@@ -1,4 +1,5 @@
 spotipy
+inky
 requests 
 Pillow 
 
