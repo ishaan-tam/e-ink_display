@@ -1,84 +1,73 @@
 import time
 import requests
 from io import BytesIO
-from PIL import Image, ImageTk
+from PIL import Image, ImageDraw, ImageFont
 import spotipy
 from spotipy.oauth2 import SpotifyOAuth
-import tkinter as tk
+from inky.auto import auto
 
-# === FILL THESE IN ===
+# === ENTER YOUR SPOTIFY CREDENTIALS ===
 CLIENT_ID = "0fabf53d6f5e4d0ba6a71aaca4e4d64b"
 CLIENT_SECRET = "99db601fe5f2497fbf80f0d67f0b5b03"
 REDIRECT_URI = "http://127.0.0.1:8888/callback"
-# ======================
+# =======================================
 
 scope = "user-read-currently-playing"
 
-# Auth with Spotify
 sp = spotipy.Spotify(auth_manager=SpotifyOAuth(
     client_id=CLIENT_ID,
     client_secret=CLIENT_SECRET,
     redirect_uri=REDIRECT_URI,
     scope=scope,
-    open_browser=True
+    open_browser=False
 ))
 
-# GUI setup
-window = tk.Tk()
-window.title("Now Playing on Spotify")
-window.geometry("500x500")
-window.resizable(False, False)
+# Setup Inky display
+display = auto()
+WIDTH, HEIGHT = display.resolution
 
-canvas = tk.Canvas(window, width=500, height=500)
-canvas.pack(fill="both", expand=True)
+# Use system fonts (adjust path if needed)
+font_title = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 22)
+font_artist = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 18)
 
-track_var = tk.StringVar()
-artist_var = tk.StringVar()
+last_track_id = None
 
-track_label = tk.Label(window, textvariable=track_var, font=("Helvetica", 16), bg="black", fg="white")
-artist_label = tk.Label(window, textvariable=artist_var, font=("Helvetica", 12), bg="black", fg="white")
+def draw_display(track, artist, album_art_url):
+    try:
+        # Download album art
+        response = requests.get(album_art_url)
+        art = Image.open(BytesIO(response.content)).resize((WIDTH, HEIGHT)).convert("RGB")
 
-canvas.create_window(250, 400, window=track_label)
-canvas.create_window(250, 430, window=artist_label)
+        # Draw text overlay
+        draw = ImageDraw.Draw(art)
+        draw.rectangle([0, HEIGHT - 60, WIDTH, HEIGHT], fill=(0, 0, 0))
+        draw.text((10, HEIGHT - 55), track, font=font_title, fill=(255, 255, 255))
+        draw.text((10, HEIGHT - 30), artist, font=font_artist, fill=(255, 255, 255))
 
-bg_img_ref = None  # Keep reference so image doesn't get garbage collected
+        # Update the e-ink display
+        display.set_image(art)
+        display.show()
 
-def update_song():
-    global bg_img_ref
+    except Exception as e:
+        print(f"[ERROR] Failed to draw display: {e}")
 
+while True:
     try:
         current = sp.current_user_playing_track()
         if current and current["is_playing"]:
-            track = current["item"]["name"]
-            artist = current["item"]["artists"][0]["name"]
-            img_url = current["item"]["album"]["images"][0]["url"]
+            track_id = current["item"]["id"]
+            if track_id != last_track_id:
+                track = current["item"]["name"]
+                artist = current["item"]["artists"][0]["name"]
+                album_art_url = current["item"]["album"]["images"][0]["url"]
 
-            track_var.set(f"{track}")
-            artist_var.set(f"{artist}")
-
-            # Download album art
-            response = requests.get(img_url)
-            img_data = BytesIO(response.content)
-            pil_img = Image.open(img_data).resize((500, 500)).convert("RGB")
-            bg_img_ref = ImageTk.PhotoImage(pil_img)
-
-            # Set background image
-            canvas.create_image(0, 0, image=bg_img_ref, anchor="nw")
-            canvas.create_window(250, 400, window=track_label)
-            canvas.create_window(250, 430, window=artist_label)
-
+                print(f"Now playing: {track} – {artist}")
+                draw_display(track, artist, album_art_url)
+                last_track_id = track_id
         else:
-            track_var.set("No song playing.")
-            artist_var.set("")
+            print("No song currently playing.")
 
     except Exception as e:
-        track_var.set("Error")
-        artist_var.set(str(e))
+        print(f"[ERROR] Spotify polling failed: {e}")
 
-    window.after(5000, update_song)
-
-update_song()
-window.mainloop()
-
-
-
+    time.sleep(30)  # Poll every 30s to preserve e-ink
