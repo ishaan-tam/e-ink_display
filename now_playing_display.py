@@ -27,7 +27,7 @@ font_list   = ImageFont.truetype(FONT_REG, 16)
 
 # ---- Behaviour knobs ----
 IDLE_SECS = 600            # 10 minutes to switch to top-tracks mode
-POLL_ACTIVE = 15           # when playing, check every 30s (inky refresh is slow anyway)
+POLL_ACTIVE = 15           # when playing, check every 15s
 POLL_IDLE   = 60           # when idle, check every 60s
 TOP_CACHE_TTL = 3600       # refresh top tracks at most once per hour
 IDLE_REDRAW_GAP = 300      # don’t redraw idle screen more often than every 5 minutes
@@ -65,7 +65,7 @@ def paste_rotated(img_portrait):
     display.set_image(rotated)
     display.show()
 
-def draw_now_playing(track, artist, art_url, progress=None, duration=None):
+def draw_now_playing(track, artist, art_url):
     # Base portrait
     img = Image.new("RGB", (PORTRAIT_W, PORTRAIT_H), (255,255,255))
     draw = ImageDraw.Draw(img)
@@ -82,7 +82,7 @@ def draw_now_playing(track, artist, art_url, progress=None, duration=None):
     artist_draw = truncate(draw, artist, font_artist, max_w)
     draw.text((margin, y0 + 10), track_draw,  font=font_title,  fill=(255,255,255))
     draw.text((margin, y0 + 48), artist_draw, font=font_artist, fill=(230,230,230))
-
+    paste_rotated(img)
 
 _top_cache = {"ts": 0, "items": None}
 def get_top_tracks(limit=7, time_range="short_term"):
@@ -99,7 +99,6 @@ def get_top_tracks(limit=7, time_range="short_term"):
 
 def draw_idle_top_list(include_hero_in_list=True):
     top = get_top_tracks(limit=7, time_range="short_term")  # last ~4 weeks
-    # Fallback
     if not top:
         img = Image.new("RGB", (PORTRAIT_W, PORTRAIT_H), (255,255,255))
         draw = ImageDraw.Draw(img)
@@ -127,7 +126,6 @@ def draw_idle_top_list(include_hero_in_list=True):
     list_y = y0 + 8 + 24
     line_h = 22
     max_w = PORTRAIT_W - margin*2 - 18
-    # Build list: include hero if requested
     listing = top if include_hero_in_list else top[1:]
     max_lines = (PORTRAIT_H - list_y) // line_h
     for i, t in enumerate(listing[:max_lines]):
@@ -138,7 +136,7 @@ def draw_idle_top_list(include_hero_in_list=True):
 
     paste_rotated(img)
 
-# ---- Main loop (mode switching) ----
+# ---- Main loop ----
 last_track_id = None
 last_active_ts = time.monotonic()
 idle_last_draw = 0
@@ -154,12 +152,10 @@ while True:
             track = current["item"]["name"]
             artist = current["item"]["artists"][0]["name"]
             album_art_url = current["item"]["album"]["images"][0]["url"]
-            progress = current.get("progress_ms")
-            duration = current["item"].get("duration_ms")
 
             if track_id != last_track_id or idle_shown:
                 print(f"Now playing: {track} – {artist}")
-                draw_now_playing(track, artist, album_art_url, progress, duration)
+                draw_now_playing(track, artist, album_art_url)
                 last_track_id = track_id
                 idle_shown = False
 
@@ -170,7 +166,6 @@ while True:
             # Idle / paused
             idle_for = time.monotonic() - last_active_ts
             if idle_for >= IDLE_SECS:
-                # Only redraw idle screen occasionally
                 if not idle_shown or (time.monotonic() - idle_last_draw) >= IDLE_REDRAW_GAP:
                     print("Idle mode: showing top tracks")
                     draw_idle_top_list(include_hero_in_list=True)
@@ -178,11 +173,9 @@ while True:
                     idle_shown = True
                 sleep_s = POLL_IDLE
             else:
-                # Within idle window; just wait
                 sleep_s = POLL_ACTIVE
 
     except spotipy.SpotifyException as e:
-        # Rate limit backoff
         if getattr(e, "http_status", None) == 429:
             retry_after = int(getattr(e, "headers", {}).get("Retry-After", 10))
             print(f"429 rate-limited. Backing off {retry_after}s")
