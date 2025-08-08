@@ -83,17 +83,6 @@ def draw_now_playing(track, artist, art_url, progress=None, duration=None):
     draw.text((margin, y0 + 10), track_draw,  font=font_title,  fill=(255,255,255))
     draw.text((margin, y0 + 48), artist_draw, font=font_artist, fill=(230,230,230))
 
-"""
-    # Optional progress bar (tiny)
-    if progress is not None and duration:
-        pct = max(0, min(1, progress / duration))
-        bar_y = PORTRAIT_H - 12
-        bar_x0 = margin
-        bar_x1 = margin + int((PORTRAIT_W - margin*2) * pct)
-        draw.rectangle([bar_x0, bar_y, bar_x1, bar_y+4], fill=(255,255,255))
-
-    paste_rotated(img)
-"""
 
 _top_cache = {"ts": 0, "items": None}
 def get_top_tracks(limit=7, time_range="short_term"):
