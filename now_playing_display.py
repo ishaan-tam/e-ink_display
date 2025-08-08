@@ -5,6 +5,13 @@ from PIL import Image, ImageDraw, ImageFont
 import spotipy
 from spotipy.oauth2 import SpotifyOAuth
 from inky.auto import auto
+
+# === ENTER YOUR SPOTIFY CREDENTIALS ===
+CLIENT_ID = "0fabf53d6f5e4d0ba6a71aaca4e4d64b"
+CLIENT_SECRET = "99db601fe5f2497fbf80f0d67f0b5b03"
+REDIRECT_URI = "http://127.0.0.1:8888/callback"
+# =======================================
+
 # ---- Layout settings (portrait composition, rotate to panel) ----
 PORTRAIT_W, PORTRAIT_H = 448, 600
 ROTATE_DEG = 90             # use -90 if orientation is wrong on your panel
