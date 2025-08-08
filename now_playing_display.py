@@ -17,9 +17,14 @@ PORTRAIT_W, PORTRAIT_H = 448, 600
 GRID_SIZE = 224  # 2x2 tiles fill top 448x448
 ROTATE_DEG = 90  # flip to the 600x448 panel; use -90 if orientation is wrong
 
-# Need top tracks permission
-scope = "user-top-read"
+# Portrait canvas; we rotate to the panel at the end
+PORTRAIT_W, PORTRAIT_H = 448, 600
+TOP_ART_SIZE = 448            # square art at top
+TEXT_H = PORTRAIT_H - TOP_ART_SIZE  # 152 px
+ROTATE_DEG = 90               # use -90 if orientation is flipped
 
+# Need top-tracks access
+scope = "user-top-read"
 sp = spotipy.Spotify(auth_manager=SpotifyOAuth(
     client_id=CLIENT_ID,
     client_secret=CLIENT_SECRET,
@@ -29,16 +34,15 @@ sp = spotipy.Spotify(auth_manager=SpotifyOAuth(
 ))
 
 display = auto()
-PANEL_W, PANEL_H = display.resolution  # 600 x 448 (Inky Impression 5.7")
+PANEL_W, PANEL_H = display.resolution
 
-# Fonts (adjust sizes if you want tighter text)
+# Fonts
 FONT_BOLD = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
 FONT_REG  = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
-font_title  = ImageFont.truetype(FONT_BOLD, 16)
-font_artist = ImageFont.truetype(FONT_REG, 14)
+font_header = ImageFont.truetype(FONT_BOLD, 18)
+font_list   = ImageFont.truetype(FONT_REG, 16)
 
 def truncate(draw, text, font, max_w):
-    """Truncate text with ellipsis to fit max_w."""
     if draw.textlength(text, font=font) <= max_w:
         return text
     ell = "…"
@@ -52,53 +56,73 @@ def truncate(draw, text, font, max_w):
             hi = mid
     return text[:max(0, lo-1)] + ell
 
-def fetch_top4():
-    # short_term (last 4 weeks) or medium_term (6 months)
-    items = sp.current_user_top_tracks(limit=4, time_range="short_term")["items"]
-    top = []
+def fetch_top_tracks(limit=7):
+    # short_term ≈ last ~4 weeks
+    res = sp.current_user_top_tracks(limit=limit, time_range="short_term")
+    items = res.get("items", [])
+    # Return list of dicts with name, artist, image
+    out = []
     for it in items:
         name   = it["name"]
         artist = it["artists"][0]["name"]
         img    = it["album"]["images"][0]["url"]
-        top.append((name, artist, img))
-    return top
+        out.append({"name": name, "artist": artist, "img": img})
+    return out
 
-def draw_top4_grid():
-    # Base portrait canvas
+def draw_top1_plus_list():
+    top = fetch_top_tracks(limit=7)   # get a few extra so list can show up to 6
+    if not top:
+        # Nothing to show; make a simple placeholder
+        img = Image.new("RGB", (PORTRAIT_W, PORTRAIT_H), (255, 255, 255))
+        draw = ImageDraw.Draw(img)
+        msg = "No top tracks available"
+        w = int(draw.textlength(msg, font=font_header))
+        draw.text(((PORTRAIT_W - w)//2, PORTRAIT_H//2 - 10), msg, font=font_header, fill=(0,0,0))
+        rotated = img.rotate(ROTATE_DEG, expand=True)
+        display.set_image(rotated)
+        display.show()
+        return
+
+    # Base portrait
     img = Image.new("RGB", (PORTRAIT_W, PORTRAIT_H), (255, 255, 255))
     draw = ImageDraw.Draw(img)
 
-    # Title band (optional)
-    header_h = 40
-    draw.rectangle([0, PORTRAIT_H - header_h, PORTRAIT_W, PORTRAIT_H], fill=(0,0,0))
-    draw.text((12, PORTRAIT_H - header_h + 10), "Your Top Tracks", font=font_title, fill=(255,255,255))
+    # --- Top track art (full 448x448) ---
+    hero = top[0]
+    art = Image.open(BytesIO(requests.get(hero["img"]).content)).convert("RGB")
+    art = art.resize((TOP_ART_SIZE, TOP_ART_SIZE))
+    img.paste(art, (0, 0))
 
-    # Place 2x2 tiles in the top 448x448
-    positions = [(0,0), (GRID_SIZE,0), (0,GRID_SIZE), (GRID_SIZE,GRID_SIZE)]
-    max_text_w = GRID_SIZE - 10*2  # padding inside each tile
+    # --- Bottom text area ---
+    margin_x = 12
+    y0 = TOP_ART_SIZE
+    draw.rectangle([0, y0, PORTRAIT_W, PORTRAIT_H], fill=(0, 0, 0))
 
-    top4 = fetch_top4()
-    for (name, artist, url), (x, y) in zip(top4, positions):
-        # Fetch art
-        art = Image.open(BytesIO(requests.get(url).content)).convert("RGB")
-        art = art.resize((GRID_SIZE, GRID_SIZE))
-        img.paste(art, (x, y))
+    # Header
+    header_text = "Top this week"
+    draw.text((margin_x, y0 + 8), header_text, font=font_header, fill=(255, 255, 255))
 
-        # Overlay text band inside tile (bottom)
-        band_h = 38
-        draw.rectangle([x, y + GRID_SIZE - band_h, x + GRID_SIZE, y + GRID_SIZE], fill=(0,0,0))
-        title_line  = truncate(draw, name,   font_title,  max_text_w)
-        artist_line = truncate(draw, artist, font_artist, max_text_w)
-        draw.text((x + 10, y + GRID_SIZE - band_h + 4),  title_line,  font=font_title,  fill=(255,255,255))
-        draw.text((x + 10, y + GRID_SIZE - band_h + 20), artist_line, font=font_artist, fill=(220,220,220))
+    # Bullet list of the next top tracks (skip the top 1)
+    list_y = y0 + 8 + 24  # below header
+    line_h = 22           # tweak if you change font size
+    max_lines = (TOP_ART_SIZE + TEXT_H - list_y) // line_h   # lines that fit
+    max_w = PORTRAIT_W - margin_x*2
 
-    # Rotate portrait to panel orientation and show
-    rotated = img.rotate(ROTATE_DEG, expand=True)  # becomes 600x448
+    others = top[1:]  # everything after the hero
+    # We try to show up to 6 “others” if space allows
+    for i, t in enumerate(others[:6]):
+        if i >= max_lines:
+            break
+        line = f"{t['name']} — {t['artist']}"
+        line = truncate(draw, line, font_list, max_w - 18)  # leave room for bullet
+        # Draw bullet + text
+        draw.text((margin_x, list_y + i*line_h), "•", font=font_list, fill=(220,220,220))
+        draw.text((margin_x + 14, list_y + i*line_h), line, font=font_list, fill=(230,230,230))
+
+    # Rotate portrait → panel and display
+    rotated = img.rotate(ROTATE_DEG, expand=True)  # 600x448
     display.set_image(rotated)
     display.show()
 
 if __name__ == "__main__":
-    try:
-        draw_top4_grid()
-    except Exception as e:
-        print("[ERROR]", e)
+    draw_top1_plus_list()
