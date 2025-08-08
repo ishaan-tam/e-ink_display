@@ -26,7 +26,7 @@ font_header = ImageFont.truetype(FONT_BOLD, 18)
 font_list   = ImageFont.truetype(FONT_REG, 16)
 
 # ---- Behaviour knobs ----
-IDLE_SECS = 600            # 10 minutes to switch to top-tracks mode
+IDLE_SECS = 180            # 3 minutes to switch to top-tracks mode
 POLL_ACTIVE = 15           # when playing, check every 15s
 POLL_IDLE   = 60           # when idle, check every 60s
 TOP_CACHE_TTL = 3600       # refresh top tracks at most once per hour
