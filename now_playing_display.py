@@ -108,7 +108,7 @@ def draw_top1_plus_list():
     max_lines = (TOP_ART_SIZE + TEXT_H - list_y) // line_h   # lines that fit
     max_w = PORTRAIT_W - margin_x*2
 
-    others = top[1:]  # everything after the hero
+    others = top[0:]  # everything including the hero
     # We try to show up to 6 “others” if space allows
     for i, t in enumerate(others[:6]):
         if i >= max_lines:
