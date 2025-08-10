@@ -30,6 +30,7 @@ IDLE_SECS   = 300           # switch to top-tracks after 3 min (use 600 for 10 m
 POLL_ACTIVE = 3            # when playing, check every 15s
 POLL_IDLE   = 60            # when idle, check every 60s
 TOP_CACHE_TTL = 3600        # refresh top tracks at most once per hour
+DEBOUNCE_MS = 3000       # must listen ≥ 3s before updating
 
 # ---- Spotify + Inky init ----
 scope = "user-read-currently-playing user-top-read"
@@ -139,38 +140,52 @@ def draw_idle_top_list(top_items, include_hero_in_list=True):
     paste_rotated(img)
 
 # ---- Main loop ----
-last_track_id   = None
+last_track_id   = None        # last track we actually rendered
 last_active_ts  = time.monotonic()
 idle_shown      = False
-last_idle_sig   = None  # stores signature of last drawn idle screen
+last_idle_sig   = None
+
+# Debounce state
+candidate_id         = None   # currently observed track id
+candidate_first_seen = 0      # monotonic() when we first saw candidate
 
 while True:
     sleep_s = POLL_ACTIVE
     try:
         current = sp.current_user_playing_track()
         if current and current.get("is_playing") and current.get("item"):
-            # Active playback
-            track_id = current["item"]["id"]
-            track = current["item"]["name"]
+            tid    = current["item"]["id"]
+            track  = current["item"]["name"]
             artist = current["item"]["artists"][0]["name"]
-            album_art_url = current["item"]["album"]["images"][0]["url"]
+            arturl = current["item"]["album"]["images"][0]["url"]
+            prog   = current.get("progress_ms") or 0
 
-            if track_id != last_track_id or idle_shown:
-                print(f"Now playing: {track} – {artist}")
-                draw_now_playing(track, artist, album_art_url)
-                last_track_id = track_id
-                idle_shown = False
+            now = time.monotonic()
+            last_active_ts = now
 
-            last_active_ts = time.monotonic()
+            # --- Debounce: must be the same track for >= 3s of play ---
+            if candidate_id != tid:
+                candidate_id = tid
+                # anchor “first seen” to *start of track* using progress_ms
+                candidate_first_seen = now - (prog / 1000.0)
+
+            listened_ms = (now - candidate_first_seen) * 1000.0
+            if listened_ms >= DEBOUNCE_MS:
+                # Only draw if the debounced candidate differs from what we last rendered
+                if tid != last_track_id or idle_shown:
+                    print(f"Now playing (debounced): {track} – {artist}")
+                    draw_now_playing(track, artist, arturl)
+                    last_track_id = tid
+                    idle_shown = False
+
             sleep_s = POLL_ACTIVE
 
         else:
-            # Idle / paused
+            # --- Idle / paused ---
             idle_for = time.monotonic() - last_active_ts
             if idle_for >= IDLE_SECS:
-                # Poll top tracks but only redraw if they changed
                 top_items = get_top_tracks(limit=7, time_range="short_term")
-                sig = top_signature(top_items)
+                sig = tuple(t["id"] for t in top_items) if top_items else None
                 if (not idle_shown) or (sig != last_idle_sig):
                     print("Idle mode: top tracks changed → redraw")
                     draw_idle_top_list(top_items, include_hero_in_list=True)
