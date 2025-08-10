@@ -12,12 +12,12 @@ CLIENT_SECRET = "99db601fe5f2497fbf80f0d67f0b5b03"
 REDIRECT_URI = "http://127.0.0.1:8888/callback"
 # =======================================
 
-# ---- Layout settings (portrait composition, rotate to panel) ----
+# ---- Layout (portrait compose -> rotate to panel) ----
 PORTRAIT_W, PORTRAIT_H = 448, 600
-ROTATE_DEG = 90             # use -90 if orientation is wrong on your panel
-TOP_ART_SIZE = 448          # now-playing art or top-1 art size
-TEXT_H = PORTRAIT_H - TOP_ART_SIZE
-# Fonts
+TOP_ART_SIZE = 448
+ROTATE_DEG = 90  # use -90 if orientation appears flipped
+
+# Fonts (adjust sizes/paths if needed)
 FONT_BOLD = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
 FONT_REG  = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
 font_title  = ImageFont.truetype(FONT_BOLD, 28)
@@ -25,12 +25,12 @@ font_artist = ImageFont.truetype(FONT_REG, 22)
 font_header = ImageFont.truetype(FONT_BOLD, 18)
 font_list   = ImageFont.truetype(FONT_REG, 16)
 
-# ---- Behaviour knobs ----
-IDLE_SECS   = 300           # switch to top-tracks after 3 min (use 600 for 10 min)
-POLL_ACTIVE = 3            # when playing, check every 15s
-POLL_IDLE   = 60            # when idle, check every 60s
-TOP_CACHE_TTL = 3600        # refresh top tracks at most once per hour
-DEBOUNCE_MS = 3000       # must listen ≥ 3s before updating
+# ---- Behavior knobs ----
+IDLE_SECS     = 600   # 10 minutes to switch to top-tracks mode
+POLL_ACTIVE   = 5     # poll every 5s while playing
+POLL_IDLE     = 60    # poll every 60s while idle
+DEBOUNCE_MS   = 3000  # require 3s listened time before updating a new track
+TOP_CACHE_TTL = 21600 # 6h cache for top tracks to prevent churn (24h = 86400)
 
 # ---- Spotify + Inky init ----
 scope = "user-read-currently-playing user-top-read"
@@ -42,10 +42,10 @@ sp = spotipy.Spotify(auth_manager=SpotifyOAuth(
     open_browser=False
 ))
 
-display = auto()
+display = auto()  # auto-detect Inky panel
 PANEL_W, PANEL_H = display.resolution  # 600 x 448 on Inky Impression 5.7
 
-# ---- Helpers ----
+# ---------------- helpers ----------------
 def truncate(draw, text, font, max_w):
     if draw.textlength(text, font=font) <= max_w:
         return text
@@ -68,9 +68,13 @@ def paste_rotated(img_portrait):
 def draw_now_playing(track, artist, art_url):
     img = Image.new("RGB", (PORTRAIT_W, PORTRAIT_H), (255,255,255))
     draw = ImageDraw.Draw(img)
+
+    # album art
     art = Image.open(BytesIO(requests.get(art_url).content)).convert("RGB")
     art = art.resize((TOP_ART_SIZE, TOP_ART_SIZE))
     img.paste(art, (0, 0))
+
+    # bottom text band
     y0 = TOP_ART_SIZE
     draw.rectangle([0, y0, PORTRAIT_W, PORTRAIT_H], fill=(0,0,0))
     margin = 12
@@ -79,9 +83,10 @@ def draw_now_playing(track, artist, art_url):
     artist_draw = truncate(draw, artist, font_artist, max_w)
     draw.text((margin, y0 + 10), track_draw,  font=font_title,  fill=(255,255,255))
     draw.text((margin, y0 + 48), artist_draw, font=font_artist, fill=(230,230,230))
+
     paste_rotated(img)
 
-# ---- Top-tracks fetching with caching ----
+# ---- Top tracks with caching/signature ----
 _top_cache = {"ts": 0, "items": None}
 
 def get_top_tracks(limit=7, time_range="short_term"):
@@ -98,29 +103,26 @@ def get_top_tracks(limit=7, time_range="short_term"):
     return _top_cache["items"]
 
 def top_signature(top_items):
-    """A stable signature we can compare to avoid unnecessary redraws."""
-    return tuple(t["id"] for t in top_items)
+    return tuple(t["id"] for t in top_items) if top_items else None
 
 def draw_idle_top_list(top_items, include_hero_in_list=True):
+    img = Image.new("RGB", (PORTRAIT_W, PORTRAIT_H), (255,255,255))
+    draw = ImageDraw.Draw(img)
+
     if not top_items:
-        img = Image.new("RGB", (PORTRAIT_W, PORTRAIT_H), (255,255,255))
-        draw = ImageDraw.Draw(img)
         msg = "No top tracks available"
         w = int(draw.textlength(msg, font=font_header))
         draw.text(((PORTRAIT_W - w)//2, PORTRAIT_H//2 - 10), msg, font=font_header, fill=(0,0,0))
         paste_rotated(img)
         return
 
-    img = Image.new("RGB", (PORTRAIT_W, PORTRAIT_H), (255,255,255))
-    draw = ImageDraw.Draw(img)
-
-    # Hero art (top1)
+    # hero art (top1)
     hero = top_items[0]
     art = Image.open(BytesIO(requests.get(hero["img"]).content)).convert("RGB")
     art = art.resize((TOP_ART_SIZE, TOP_ART_SIZE))
     img.paste(art, (0, 0))
 
-    # Bottom band
+    # bottom band
     y0 = TOP_ART_SIZE
     draw.rectangle([0, y0, PORTRAIT_W, PORTRAIT_H], fill=(0,0,0))
     margin = 12
@@ -139,21 +141,23 @@ def draw_idle_top_list(top_items, include_hero_in_list=True):
 
     paste_rotated(img)
 
-# ---- Main loop ----
-last_track_id   = None        # last track we actually rendered
+# ---------------- main loop ----------------
+last_track_id   = None           # last rendered track
 last_active_ts  = time.monotonic()
 idle_shown      = False
 last_idle_sig   = None
 
-# Debounce state
-candidate_id         = None   # currently observed track id
-candidate_first_seen = 0      # monotonic() when we first saw candidate
+# debounce state
+candidate_id         = None
+candidate_first_seen = 0.0
 
 while True:
     sleep_s = POLL_ACTIVE
     try:
         current = sp.current_user_playing_track()
+
         if current and current.get("is_playing") and current.get("item"):
+            # --- playing ---
             tid    = current["item"]["id"]
             track  = current["item"]["name"]
             artist = current["item"]["artists"][0]["name"]
@@ -163,15 +167,13 @@ while True:
             now = time.monotonic()
             last_active_ts = now
 
-            # --- Debounce: must be the same track for >= 3s of play ---
+            # debounce: require ≥ DEBOUNCE_MS listened time for a new track
             if candidate_id != tid:
                 candidate_id = tid
-                # anchor “first seen” to *start of track* using progress_ms
-                candidate_first_seen = now - (prog / 1000.0)
+                candidate_first_seen = now - (prog / 1000.0)  # anchor to start of track via progress_ms
 
             listened_ms = (now - candidate_first_seen) * 1000.0
             if listened_ms >= DEBOUNCE_MS:
-                # Only draw if the debounced candidate differs from what we last rendered
                 if tid != last_track_id or idle_shown:
                     print(f"Now playing (debounced): {track} – {artist}")
                     draw_now_playing(track, artist, arturl)
@@ -181,13 +183,14 @@ while True:
             sleep_s = POLL_ACTIVE
 
         else:
-            # --- Idle / paused ---
+            # --- idle / paused ---
             idle_for = time.monotonic() - last_active_ts
             if idle_for >= IDLE_SECS:
+                # Poll top tracks (cached) and compute signature; redraw ONLY if changed or first idle
                 top_items = get_top_tracks(limit=7, time_range="short_term")
-                sig = tuple(t["id"] for t in top_items) if top_items else None
+                sig = top_signature(top_items)
                 if (not idle_shown) or (sig != last_idle_sig):
-                    print("Idle mode: top tracks changed → redraw")
+                    print("Idle mode: top tracks changed (or first idle) → redraw")
                     draw_idle_top_list(top_items, include_hero_in_list=True)
                     last_idle_sig = sig
                     idle_shown = True
@@ -198,6 +201,7 @@ while True:
                 sleep_s = POLL_ACTIVE
 
     except spotipy.SpotifyException as e:
+        # Handle rate-limit gracefully
         if getattr(e, "http_status", None) == 429:
             retry_after = int(getattr(e, "headers", {}).get("Retry-After", 10))
             print(f"429 rate-limited. Backing off {retry_after}s")
