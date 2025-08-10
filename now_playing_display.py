@@ -16,7 +16,7 @@ REDIRECT_URI = "http://127.0.0.1:8888/callback"
 PORTRAIT_W, PORTRAIT_H = 448, 600
 ROTATE_DEG = 90             # use -90 if orientation is wrong on your panel
 TOP_ART_SIZE = 448          # now-playing art or top-1 art size
-TEXT_H = PORTRAIT_H - TOP_ART_SIZE  # 152 px band
+TEXT_H = PORTRAIT_H - TOP_ART_SIZE
 # Fonts
 FONT_BOLD = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
 FONT_REG  = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
@@ -26,11 +26,10 @@ font_header = ImageFont.truetype(FONT_BOLD, 18)
 font_list   = ImageFont.truetype(FONT_REG, 16)
 
 # ---- Behaviour knobs ----
-IDLE_SECS = 180            # 3 minutes to switch to top-tracks mode
-POLL_ACTIVE = 15           # when playing, check every 15s
-POLL_IDLE   = 60           # when idle, check every 60s
-TOP_CACHE_TTL = 3600       # refresh top tracks at most once per hour
-IDLE_REDRAW_GAP = 300      # don’t redraw idle screen more often than every 5 minutes
+IDLE_SECS   = 180           # switch to top-tracks after 3 min (use 600 for 10 min)
+POLL_ACTIVE = 15            # when playing, check every 15s
+POLL_IDLE   = 60            # when idle, check every 60s
+TOP_CACHE_TTL = 3600        # refresh top tracks at most once per hour
 
 # ---- Spotify + Inky init ----
 scope = "user-read-currently-playing user-top-read"
@@ -66,14 +65,11 @@ def paste_rotated(img_portrait):
     display.show()
 
 def draw_now_playing(track, artist, art_url):
-    # Base portrait
     img = Image.new("RGB", (PORTRAIT_W, PORTRAIT_H), (255,255,255))
     draw = ImageDraw.Draw(img)
-    # Art
     art = Image.open(BytesIO(requests.get(art_url).content)).convert("RGB")
     art = art.resize((TOP_ART_SIZE, TOP_ART_SIZE))
     img.paste(art, (0, 0))
-    # Text band
     y0 = TOP_ART_SIZE
     draw.rectangle([0, y0, PORTRAIT_W, PORTRAIT_H], fill=(0,0,0))
     margin = 12
@@ -84,12 +80,15 @@ def draw_now_playing(track, artist, art_url):
     draw.text((margin, y0 + 48), artist_draw, font=font_artist, fill=(230,230,230))
     paste_rotated(img)
 
+# ---- Top-tracks fetching with caching ----
 _top_cache = {"ts": 0, "items": None}
+
 def get_top_tracks(limit=7, time_range="short_term"):
     now = time.monotonic()
     if not _top_cache["items"] or (now - _top_cache["ts"]) > TOP_CACHE_TTL:
         items = sp.current_user_top_tracks(limit=limit, time_range=time_range).get("items", [])
         _top_cache["items"] = [{
+            "id": it["id"],
             "name": it["name"],
             "artist": it["artists"][0]["name"],
             "img": it["album"]["images"][0]["url"]
@@ -97,9 +96,12 @@ def get_top_tracks(limit=7, time_range="short_term"):
         _top_cache["ts"] = now
     return _top_cache["items"]
 
-def draw_idle_top_list(include_hero_in_list=True):
-    top = get_top_tracks(limit=7, time_range="short_term")  # last ~4 weeks
-    if not top:
+def top_signature(top_items):
+    """A stable signature we can compare to avoid unnecessary redraws."""
+    return tuple(t["id"] for t in top_items)
+
+def draw_idle_top_list(top_items, include_hero_in_list=True):
+    if not top_items:
         img = Image.new("RGB", (PORTRAIT_W, PORTRAIT_H), (255,255,255))
         draw = ImageDraw.Draw(img)
         msg = "No top tracks available"
@@ -112,7 +114,7 @@ def draw_idle_top_list(include_hero_in_list=True):
     draw = ImageDraw.Draw(img)
 
     # Hero art (top1)
-    hero = top[0]
+    hero = top_items[0]
     art = Image.open(BytesIO(requests.get(hero["img"]).content)).convert("RGB")
     art = art.resize((TOP_ART_SIZE, TOP_ART_SIZE))
     img.paste(art, (0, 0))
@@ -126,7 +128,7 @@ def draw_idle_top_list(include_hero_in_list=True):
     list_y = y0 + 8 + 24
     line_h = 22
     max_w = PORTRAIT_W - margin*2 - 18
-    listing = top if include_hero_in_list else top[1:]
+    listing = top_items if include_hero_in_list else top_items[1:]
     max_lines = (PORTRAIT_H - list_y) // line_h
     for i, t in enumerate(listing[:max_lines]):
         line = f"{t['name']} — {t['artist']}"
@@ -137,10 +139,10 @@ def draw_idle_top_list(include_hero_in_list=True):
     paste_rotated(img)
 
 # ---- Main loop ----
-last_track_id = None
-last_active_ts = time.monotonic()
-idle_last_draw = 0
-idle_shown = False
+last_track_id   = None
+last_active_ts  = time.monotonic()
+idle_shown      = False
+last_idle_sig   = None  # stores signature of last drawn idle screen
 
 while True:
     sleep_s = POLL_ACTIVE
@@ -166,11 +168,16 @@ while True:
             # Idle / paused
             idle_for = time.monotonic() - last_active_ts
             if idle_for >= IDLE_SECS:
-                if not idle_shown or (time.monotonic() - idle_last_draw) >= IDLE_REDRAW_GAP:
-                    print("Idle mode: showing top tracks")
-                    draw_idle_top_list(include_hero_in_list=True)
-                    idle_last_draw = time.monotonic()
+                # Poll top tracks but only redraw if they changed
+                top_items = get_top_tracks(limit=7, time_range="short_term")
+                sig = top_signature(top_items)
+                if (not idle_shown) or (sig != last_idle_sig):
+                    print("Idle mode: top tracks changed → redraw")
+                    draw_idle_top_list(top_items, include_hero_in_list=True)
+                    last_idle_sig = sig
                     idle_shown = True
+                else:
+                    print("Idle mode: no change → no redraw")
                 sleep_s = POLL_IDLE
             else:
                 sleep_s = POLL_ACTIVE
