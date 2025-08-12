@@ -61,7 +61,8 @@ def truncate(draw, text, font, max_w):
     return text[:max(0, lo-1)] + ell
 
 def paste_rotated(img_portrait):
-    rotated = img_portrait.rotate(ROTATE_DEG, expand=True)  # -> 600x448
+    # Flip everything (art + text) by 180° on top of your base rotation
+    rotated = img_portrait.rotate((ROTATE_DEG + 180) % 360, expand=True)  # -> 600x448
     display.set_image(rotated)
     display.show()
 
