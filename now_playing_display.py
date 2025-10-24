@@ -8,7 +8,7 @@ from inky.auto import auto
 
 # === USER SETTINGS ===
 ORIENTATION   = "landscape"   # "portrait" or "landscape"
-ROTATE_OFFSET = 0             # additional rotation degrees (-90, 90, 180)
+ROTATE_OFFSET = 90             # additional rotation degrees (-90, 90, 180)
 FLIP_180      = False         # True if the image appears upside down
 # ======================
 
