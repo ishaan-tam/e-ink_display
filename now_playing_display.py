@@ -98,32 +98,40 @@ def draw_now_playing_portrait(track, artist, art_url):
     display.show()
 
 def draw_now_playing_landscape(track, artist, art_url):
-    """Album art centered horizontally, text bar along bottom"""
+    """Full-screen album art with text overlay at bottom"""
     img = Image.new("RGB", (LANDSCAPE_W, LANDSCAPE_H), (255,255,255))
     draw = ImageDraw.Draw(img)
 
-    # album art centered
+    # Download & resize album art to fill height (448px)
     art = Image.open(BytesIO(requests.get(art_url).content)).convert("RGB")
-    art.thumbnail((TOP_ART_SIZE, TOP_ART_SIZE))
-    art_x = (LANDSCAPE_W - art.width) // 2
-    art_y = (LANDSCAPE_H - BOTTOM_BAR_H - art.height) // 2
-    img.paste(art, (art_x, art_y))
+    art_ratio = art.width / art.height
+    new_h = LANDSCAPE_H
+    new_w = int(new_h * art_ratio)
+    art = art.resize((new_w, new_h))
 
-    # white bottom bar
-    bar_y0 = LANDSCAPE_H - BOTTOM_BAR_H
-    draw.rectangle([0, bar_y0, LANDSCAPE_W, LANDSCAPE_H], fill=(255,255,255))
+    # Center horizontally
+    art_x = (LANDSCAPE_W - new_w) // 2
+    img.paste(art, (art_x, 0))
 
-    # text centered horizontally in the bar
+    # Overlay band (semi-transparent black)
+    overlay_h = 90
+    overlay_y0 = LANDSCAPE_H - overlay_h
+    overlay = Image.new("RGBA", (LANDSCAPE_W, overlay_h), (0, 0, 0, 120))  # alpha = 120/255
+    img.paste(overlay, (0, overlay_y0), overlay)
+
+    # Draw text
+    draw = ImageDraw.Draw(img)
     margin_x = 20
-    max_w = LANDSCAPE_W - 2*margin_x
+    max_w = LANDSCAPE_W - 2 * margin_x
     track_draw  = truncate(draw, track,  font_title,  max_w)
     artist_draw = truncate(draw, artist, font_artist, max_w)
 
-    # Centered text layout
     track_w = draw.textlength(track_draw, font=font_title)
     artist_w = draw.textlength(artist_draw, font=font_artist)
-    draw.text(((LANDSCAPE_W - track_w)//2, bar_y0 + 10), track_draw,  font=font_title,  fill=(0,0,0))
-    draw.text(((LANDSCAPE_W - artist_w)//2, bar_y0 + 45), artist_draw, font=font_artist, fill=(60,60,60))
+    draw.text(((LANDSCAPE_W - track_w)//2, overlay_y0 + 10), track_draw,
+              font=font_title, fill=(255,255,255))
+    draw.text(((LANDSCAPE_W - artist_w)//2, overlay_y0 + 45), artist_draw,
+              font=font_artist, fill=(230,230,230))
 
     display.set_image(maybe_flip(img))
     display.show()
