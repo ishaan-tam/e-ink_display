@@ -6,16 +6,28 @@ import spotipy
 from spotipy.oauth2 import SpotifyOAuth
 from inky.auto import auto
 
+# === USER SETTINGS ===
+ORIENTATION   = "landscape"   # "portrait" or "landscape"
+ROTATE_OFFSET = 0             # additional rotation degrees (-90, 90, 180)
+FLIP_180      = False         # True if the image appears upside down
+# ======================
+
 # === ENTER YOUR SPOTIFY CREDENTIALS ===
 CLIENT_ID = "0fabf53d6f5e4d0ba6a71aaca4e4d64b"
 CLIENT_SECRET = "99db601fe5f2497fbf80f0d67f0b5b03"
 REDIRECT_URI = "http://127.0.0.1:8888/callback"
 # =======================================
 
-# ---- Layout (portrait compose -> rotate to panel) ----
+# ---- Orientation logic ----
+BASE_ROTATE_DEG = 90 if ORIENTATION == "portrait" else -90
+USER_OFFSET = ROTATE_OFFSET % 360
+if FLIP_180:
+    USER_OFFSET = (USER_OFFSET + 180) % 360
+FINAL_ROTATE_DEG = (BASE_ROTATE_DEG + USER_OFFSET) % 360
+
+# ---- Layout (portrait canvas, rotated before display) ----
 PORTRAIT_W, PORTRAIT_H = 448, 600
 TOP_ART_SIZE = 448
-ROTATE_DEG = 90  # use -90 if orientation appears flipped
 
 # Fonts (adjust sizes/paths if needed)
 FONT_BOLD = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
@@ -30,7 +42,7 @@ IDLE_SECS     = 600   # 10 minutes to switch to top-tracks mode
 POLL_ACTIVE   = 5     # poll every 5s while playing
 POLL_IDLE     = 60    # poll every 60s while idle
 DEBOUNCE_MS   = 3000  # require 3s listened time before updating a new track
-TOP_CACHE_TTL = 21600 # 6h cache for top tracks to prevent churn (24h = 86400)
+TOP_CACHE_TTL = 21600 # 6h cache for top tracks
 
 # ---- Spotify + Inky init ----
 scope = "user-read-currently-playing user-top-read"
@@ -42,8 +54,8 @@ sp = spotipy.Spotify(auth_manager=SpotifyOAuth(
     open_browser=False
 ))
 
-display = auto()  # auto-detect Inky panel
-PANEL_W, PANEL_H = display.resolution  # 600 x 448 on Inky Impression 5.7
+display = auto()
+PANEL_W, PANEL_H = display.resolution  # e.g. 600x448 on Inky Impression 5.7
 
 # ---------------- helpers ----------------
 def truncate(draw, text, font, max_w):
@@ -61,8 +73,7 @@ def truncate(draw, text, font, max_w):
     return text[:max(0, lo-1)] + ell
 
 def paste_rotated(img_portrait):
-    # Flip everything (art + text) by 180° on top of your base rotation
-    rotated = img_portrait.rotate((ROTATE_DEG + 180) % 360, expand=True)  # -> 600x448
+    rotated = img_portrait.rotate(FINAL_ROTATE_DEG, expand=True)
     display.set_image(rotated)
     display.show()
 
@@ -143,14 +154,15 @@ def draw_idle_top_list(top_items, include_hero_in_list=True):
     paste_rotated(img)
 
 # ---------------- main loop ----------------
-last_track_id   = None           # last rendered track
+last_track_id   = None
 last_active_ts  = time.monotonic()
 idle_shown      = False
 last_idle_sig   = None
 
-# debounce state
 candidate_id         = None
 candidate_first_seen = 0.0
+
+print(f"[Init] Panel {PANEL_W}x{PANEL_H} | orientation={ORIENTATION} | rotate={FINAL_ROTATE_DEG}°")
 
 while True:
     sleep_s = POLL_ACTIVE
@@ -158,7 +170,6 @@ while True:
         current = sp.current_user_playing_track()
 
         if current and current.get("is_playing") and current.get("item"):
-            # --- playing ---
             tid    = current["item"]["id"]
             track  = current["item"]["name"]
             artist = current["item"]["artists"][0]["name"]
@@ -171,7 +182,7 @@ while True:
             # debounce: require ≥ DEBOUNCE_MS listened time for a new track
             if candidate_id != tid:
                 candidate_id = tid
-                candidate_first_seen = now - (prog / 1000.0)  # anchor to start of track via progress_ms
+                candidate_first_seen = now - (prog / 1000.0)
 
             listened_ms = (now - candidate_first_seen) * 1000.0
             if listened_ms >= DEBOUNCE_MS:
@@ -184,10 +195,8 @@ while True:
             sleep_s = POLL_ACTIVE
 
         else:
-            # --- idle / paused ---
             idle_for = time.monotonic() - last_active_ts
             if idle_for >= IDLE_SECS:
-                # Poll top tracks (cached) and compute signature; redraw ONLY if changed or first idle
                 top_items = get_top_tracks(limit=7, time_range="short_term")
                 sig = top_signature(top_items)
                 if (not idle_shown) or (sig != last_idle_sig):
@@ -202,7 +211,6 @@ while True:
                 sleep_s = POLL_ACTIVE
 
     except spotipy.SpotifyException as e:
-        # Handle rate-limit gracefully
         if getattr(e, "http_status", None) == 429:
             retry_after = int(getattr(e, "headers", {}).get("Retry-After", 10))
             print(f"429 rate-limited. Backing off {retry_after}s")
