@@ -1,7 +1,7 @@
 import time
 import requests
 from io import BytesIO
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw, ImageFont, ImageStat
 import spotipy
 from spotipy.oauth2 import SpotifyOAuth
 from inky.auto import auto
@@ -98,28 +98,37 @@ def draw_now_playing_portrait(track, artist, art_url):
     display.show()
 
 def draw_now_playing_landscape(track, artist, art_url):
-    """Full-screen album art with text overlay at bottom"""
+    """Full-screen album art with matching side borders and text overlay"""
     img = Image.new("RGB", (LANDSCAPE_W, LANDSCAPE_H), (255,255,255))
     draw = ImageDraw.Draw(img)
 
-    # Download & resize album art to fill height (448px)
+    # --- Download & resize album art ---
     art = Image.open(BytesIO(requests.get(art_url).content)).convert("RGB")
     art_ratio = art.width / art.height
     new_h = LANDSCAPE_H
     new_w = int(new_h * art_ratio)
     art = art.resize((new_w, new_h))
 
-    # Center horizontally
+    # --- Compute dominant/average color ---
+    stat = ImageStat.Stat(art)
+    avg_color = tuple(int(c) for c in stat.mean[:3])  # (R, G, B)
+
+    # --- Draw color-matched borders ---
     art_x = (LANDSCAPE_W - new_w) // 2
+    if art_x > 0:
+        draw.rectangle([0, 0, art_x, LANDSCAPE_H], fill=avg_color)                 # left border
+        draw.rectangle([art_x + new_w, 0, LANDSCAPE_W, LANDSCAPE_H], fill=avg_color)  # right border
+
+    # Paste the art centered
     img.paste(art, (art_x, 0))
 
-    # Overlay band (semi-transparent black)
+    # --- Overlay bar for text ---
     overlay_h = 90
     overlay_y0 = LANDSCAPE_H - overlay_h
-    overlay = Image.new("RGBA", (LANDSCAPE_W, overlay_h), (0, 0, 0, 120))  # alpha = 120/255
+    overlay = Image.new("RGBA", (LANDSCAPE_W, overlay_h), (0, 0, 0, 120))  # semi-transparent black
     img.paste(overlay, (0, overlay_y0), overlay)
 
-    # Draw text
+    # --- Draw song + artist text ---
     draw = ImageDraw.Draw(img)
     margin_x = 20
     max_w = LANDSCAPE_W - 2 * margin_x
@@ -133,6 +142,7 @@ def draw_now_playing_landscape(track, artist, art_url):
     draw.text(((LANDSCAPE_W - artist_w)//2, overlay_y0 + 45), artist_draw,
               font=font_artist, fill=(230,230,230))
 
+    # --- Display on Inky ---
     display.set_image(maybe_flip(img))
     display.show()
 
