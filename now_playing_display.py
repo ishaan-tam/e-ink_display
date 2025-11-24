@@ -12,7 +12,7 @@ FLIP_180      = False         # True if image appears upside down
 
 # Sizes/colors
 LANDSCAPE_W, LANDSCAPE_H = 600, 448
-BOTTOM_BAR_H = 72                # taskbar height
+BOTTOM_BAR_H = 50                # taskbar height
 RIGHT_COL_MARGIN = 12            # gap between art and right column
 BG_COLOR = (255, 255, 255)       # main background
 TASKBAR_BG = (0, 0, 0)           # taskbar background
@@ -173,7 +173,13 @@ def draw_layout_landscape(track, artist, art_url, clock_text):
 
     # Clock at right of taskbar
     clock_w = draw.textlength(clock_text, font=font_clock)
-    draw.text((LANDSCAPE_W - clock_w - 12, bar_y0 + (BOTTOM_BAR_H - 28)//2), clock_text, font=font_clock, fill=CLOCK_COLOR)
+    clock_h = 28  # approximate height of font_clock
+    draw.text(
+        (LANDSCAPE_W - clock_w - 12, bar_y0 + (BOTTOM_BAR_H - clock_h)//2),
+        clock_text,
+        font=font_clock,
+        fill=CLOCK_COLOR
+    )       
 
     return img
 
