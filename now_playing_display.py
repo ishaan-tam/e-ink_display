@@ -14,11 +14,11 @@ FLIP_180      = False         # True if image appears upside down
 LANDSCAPE_W, LANDSCAPE_H = 600, 448
 
 # Single master control: desired album art side length (in pixels)
-# With 398 on a 448px-tall panel, bottom bar ends up ~50px tall.
-ALBUM_ART_SIDE = 398  # tweak this if you ever want slightly smaller art
+# Slightly larger so the bottom bar is smaller (~40px).
+ALBUM_ART_SIDE = 408
 
 # Internal minimums so layout doesn't collapse
-_MIN_BOTTOM_BAR_H = 40
+_MIN_BOTTOM_BAR_H = 36
 _MIN_RIGHT_COL_W  = 90
 RIGHT_COL_MARGIN  = 12
 
@@ -27,14 +27,15 @@ BG_COLOR     = (255, 255, 255)
 TASKBAR_BG   = (0, 0, 0)
 CLOCK_COLOR  = (255, 255, 255)
 TITLE_COLOR  = (0, 0, 0)
-ARTIST_COLOR = (0, 0, 0)   # high-contrast artist text now
+ARTIST_COLOR = (0, 0, 0)   # high-contrast artist text
 
 # Fonts
 FONT_BOLD = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
 FONT_REG  = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
+
 font_title   = ImageFont.truetype(FONT_BOLD, 28)
 font_artist  = ImageFont.truetype(FONT_BOLD, 28)  # same boldness/size as title
-font_clock   = ImageFont.truetype(FONT_BOLD, 28)  # used for time & date
+font_clock   = ImageFont.truetype(FONT_BOLD, 22)  # smaller for taskbar
 font_header  = ImageFont.truetype(FONT_BOLD, 18)
 font_list    = ImageFont.truetype(FONT_REG, 16)
 
@@ -167,7 +168,7 @@ def compute_layout_from_art_side():
 
 # ---- Shared taskbar drawing ----
 def draw_taskbar(draw, bottom_bar_h, clock_text, date_text):
-    """Draw bottom taskbar with time and date at the left, same font/weight."""
+    """Draw bottom taskbar with time and date at the left, smaller font."""
     bar_y0 = LANDSCAPE_H - bottom_bar_h
     # subtle divider
     draw.line([(0, bar_y0 - 1), (LANDSCAPE_W, bar_y0 - 1)], fill=(220,220,220))
@@ -177,22 +178,18 @@ def draw_taskbar(draw, bottom_bar_h, clock_text, date_text):
     # Clock + date on the left: "10:30 AM | Mon, Nov 24"
     sep = " | "
 
-    # Use font_clock for both time and date
     time_w = draw.textlength(clock_text, font=font_clock)
     sep_w  = draw.textlength(sep, font=font_clock)
     date_w = draw.textlength(date_text, font=font_clock)
 
     base_x = 12
-    clock_h_approx = 28
+    clock_h_approx = 22
     baseline_y = bar_y0 + (bottom_bar_h - clock_h_approx)//2
 
-    # time
     draw.text((base_x, baseline_y), clock_text, font=font_clock, fill=CLOCK_COLOR)
     x = base_x + time_w + 6
-    # separator
     draw.text((x, baseline_y), sep, font=font_clock, fill=CLOCK_COLOR)
     x += sep_w + 6
-    # date
     draw.text((x, baseline_y), date_text, font=font_clock, fill=CLOCK_COLOR)
 
 # ---- Landscape now-playing layout ----
@@ -225,9 +222,9 @@ def draw_layout_landscape(track, artist, art_url, clock_text, date_text):
     col_y1 = LANDSCAPE_H - bottom_bar_h
     col_w  = right_col_w
     if col_w > 0 and col_y1 > col_y0:
-        # Allow more lines for song title (up to 5)
-        title_lines  = wrap_ellipsis(draw, track, font_title,  col_w, max_lines=5)
-        # Artist: same font, no "by", high contrast
+        # Song title: up to 5 lines
+        title_lines  = wrap_ellipsis(draw, track,  font_title,  col_w, max_lines=5)
+        # Artist: same font, high contrast
         artist_text  = artist
         artist_lines = wrap_ellipsis(draw, artist_text, font_artist, col_w, max_lines=2)
 
@@ -235,7 +232,18 @@ def draw_layout_landscape(track, artist, art_url, clock_text, date_text):
         for ln in title_lines:
             draw.text((col_x0, cur_y), ln, font=font_title, fill=TITLE_COLOR)
             cur_y += 32  # line spacing for big text
-        cur_y += 6
+
+        # Separator line between song & artist (if both exist)
+        if title_lines and artist_lines:
+            sep_y = cur_y + 4
+            line_w = int(col_w * 0.5)
+            line_x0 = col_x0 + (col_w - line_w)//2
+            line_x1 = line_x0 + line_w
+            draw.line([(line_x0, sep_y), (line_x1, sep_y)], fill=(60, 60, 60), width=2)
+            cur_y = sep_y + 8
+        else:
+            cur_y += 6
+
         for ln in artist_lines:
             draw.text((col_x0, cur_y), ln, font=font_artist, fill=ARTIST_COLOR)
             cur_y += 28
@@ -248,7 +256,7 @@ def draw_layout_landscape(track, artist, art_url, clock_text, date_text):
 # ---- Portrait fallback ----
 def draw_now_playing_portrait(track, artist, art_url, clock_text, date_text):
     PORTRAIT_W, PORTRAIT_H = 448, 600
-    bar_h = 72
+    bar_h = 60  # slightly smaller portrait bar too
 
     img = Image.new("RGB", (PORTRAIT_W, PORTRAIT_H), BG_COLOR)
     draw = ImageDraw.Draw(img)
@@ -263,13 +271,24 @@ def draw_now_playing_portrait(track, artist, art_url, clock_text, date_text):
     margin = 12
     max_w = PORTRAIT_W - margin*2
     title_lines  = wrap_ellipsis(draw, track, font_title,  max_w, max_lines=5)
-    artist_text  = artist  # no "by"
+    artist_text  = artist
     artist_lines = wrap_ellipsis(draw, artist_text, font_artist, max_w, max_lines=2)
+
     cur_y = y0 + 6
     for ln in title_lines:
         draw.text((margin, cur_y), ln, font=font_title, fill=TITLE_COLOR)
         cur_y += 32
-    cur_y += 4
+
+    if title_lines and artist_lines:
+        sep_y = cur_y + 4
+        line_w = int(max_w * 0.5)
+        line_x0 = margin + (max_w - line_w)//2
+        line_x1 = line_x0 + line_w
+        draw.line([(line_x0, sep_y), (line_x1, sep_y)], fill=(60, 60, 60), width=2)
+        cur_y = sep_y + 8
+    else:
+        cur_y += 4
+
     for ln in artist_lines:
         draw.text((margin, cur_y), ln, font=font_artist, fill=ARTIST_COLOR)
         cur_y += 28
@@ -283,7 +302,7 @@ def draw_now_playing_portrait(track, artist, art_url, clock_text, date_text):
     sep_w  = draw.textlength(sep, font=font_clock)
     date_w = draw.textlength(date_text, font=font_clock)
     base_x = 10
-    clock_h_approx = 28
+    clock_h_approx = 22
     baseline_y = bar_y0 + (bar_h - clock_h_approx)//2
 
     draw.text((base_x, baseline_y), clock_text, font=font_clock, fill=CLOCK_COLOR)
