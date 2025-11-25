@@ -14,7 +14,7 @@ FLIP_180      = False         # True if image appears upside down
 LANDSCAPE_W, LANDSCAPE_H = 600, 448
 
 # Single master control: desired album art side length (in pixels)
-ALBUM_ART_SIDE = 420  # change this one number to grow/shrink art; bars adapt automatically
+ALBUM_ART_SIDE = 380  # change this one number to grow/shrink art; bars adapt automatically
 
 # Internal minimums so layout doesn't collapse
 _MIN_BOTTOM_BAR_H = 40
@@ -22,27 +22,28 @@ _MIN_RIGHT_COL_W  = 90
 RIGHT_COL_MARGIN  = 12
 
 # Colors
-BG_COLOR    = (255, 255, 255)
-TASKBAR_BG  = (0, 0, 0)
-CLOCK_COLOR = (255, 255, 255)
-TITLE_COLOR = (0, 0, 0)
-ARTIST_COLOR = (60, 60, 60)
+BG_COLOR     = (255, 255, 255)
+TASKBAR_BG   = (0, 0, 0)
+CLOCK_COLOR  = (255, 255, 255)
+TITLE_COLOR  = (0, 0, 0)
+ARTIST_COLOR = (80, 80, 80)
 
 # Fonts
 FONT_BOLD = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
 FONT_REG  = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
 font_title   = ImageFont.truetype(FONT_BOLD, 28)
-font_artist  = ImageFont.truetype(FONT_REG, 20)
+font_artist  = ImageFont.truetype(FONT_BOLD, 28)  # same size/boldness as title
 font_clock   = ImageFont.truetype(FONT_BOLD, 28)
 font_header  = ImageFont.truetype(FONT_BOLD, 18)
 font_list    = ImageFont.truetype(FONT_REG, 16)
 
 # ---- Behavior knobs ----
-IDLE_SECS     = 600
-POLL_ACTIVE   = 5
-POLL_IDLE     = 60
-DEBOUNCE_MS   = 3000
-TOP_CACHE_TTL = 21600
+IDLE_SECS         = 600    # seconds of no playback before entering standby
+POLL_ACTIVE       = 5
+POLL_IDLE         = 60
+DEBOUNCE_MS       = 3000
+TOP_CACHE_TTL     = 21600  # cache top tracks for 6h
+IDLE_REFRESH_SECS = 1800   # refresh standby screen at most every 30 min
 
 # ---- Spotify + Inky init ----
 scope = "user-read-currently-playing user-top-read"
@@ -63,7 +64,7 @@ def maybe_flip(img):
 
 # ---- Text helpers ----
 def truncate(draw, text, font, max_w):
-    """Shorten text with ellipsis to fit width"""
+    """Shorten text with ellipsis to fit width."""
     if draw.textlength(text, font=font) <= max_w:
         return text
     ell = "…"
@@ -118,14 +119,29 @@ def wrap_ellipsis(draw, text, font, max_w, max_lines):
         lines[-1] = truncate(draw, lines[-1], font, max_w)
     return lines
 
-# ---- Clock (rounded down to nearest 10 minutes) ----
+# ---- Time & date helpers ----
 def clock_str_round10():
+    """
+    Time rounded to nearest 10 minutes.
+    Changes at minutes ending in 5 (e.g. 10:05, 10:15, ...).
+    """
     tm = time.localtime()
-    rounded_min = (tm.tm_min // 10) * 10
-    hour = tm.tm_hour % 12
-    if hour == 0:
-        hour = 12
-    return f"{hour:01d}:{rounded_min:02d} {'AM' if tm.tm_hour < 12 else 'PM'}"
+    rounded_min = int(round(tm.tm_min / 10.0) * 10)
+    if rounded_min == 60:
+        tm_hour = (tm.tm_hour + 1) % 24
+        rounded_min = 0
+    else:
+        tm_hour = tm.tm_hour
+
+    hour_12 = tm_hour % 12
+    if hour_12 == 0:
+        hour_12 = 12
+    ampm = "AM" if tm_hour < 12 else "PM"
+    return f"{hour_12}:{rounded_min:02d} {ampm}"
+
+def date_str():
+    """Return date like 'Mon, Nov 24'."""
+    return time.strftime("%a, %b %d", time.localtime())
 
 # ---- Layout computation from single art-size variable ----
 def compute_layout_from_art_side():
@@ -136,14 +152,11 @@ def compute_layout_from_art_side():
       - right_col_w: remaining horizontal space (side info column)
       - col_x0: left x of right column
     """
-    # Start with desired side, clamp so that:
-    #   art_side + _MIN_BOTTOM_BAR_H <= panel height
-    #   art_side + _MIN_RIGHT_COL_W + 2*margin <= panel width
     max_side_by_height = LANDSCAPE_H - _MIN_BOTTOM_BAR_H
     max_side_by_width  = LANDSCAPE_W - _MIN_RIGHT_COL_W - 2*RIGHT_COL_MARGIN
     art_side = min(ALBUM_ART_SIDE, max_side_by_height, max_side_by_width)
 
-    # Now derive bar height & right column width from leftover space
+    # derive bar height & right column width from leftover space
     bottom_bar_h = LANDSCAPE_H - art_side
     col_x0 = art_side + RIGHT_COL_MARGIN
     col_x1 = LANDSCAPE_W - RIGHT_COL_MARGIN
@@ -151,13 +164,41 @@ def compute_layout_from_art_side():
 
     return art_side, bottom_bar_h, right_col_w, col_x0
 
-# ---- Landscape main layout ----
-def draw_layout_landscape(track, artist, art_url, clock_text):
+# ---- Shared taskbar drawing ----
+def draw_taskbar(draw, bottom_bar_h, clock_text, date_text):
+    """Draw bottom taskbar with clock and date at the left."""
+    bar_y0 = LANDSCAPE_H - bottom_bar_h
+    # subtle divider
+    draw.line([(0, bar_y0 - 1), (LANDSCAPE_W, bar_y0 - 1)], fill=(220,220,220))
+    # bar background
+    draw.rectangle([0, bar_y0, LANDSCAPE_W, LANDSCAPE_H], fill=TASKBAR_BG)
+
+    # Clock + date on the left: "10:30 AM | Mon, Nov 24"
+    time_w = draw.textlength(clock_text, font=font_clock)
+    sep = " | "
+    sep_w = draw.textlength(sep, font=font_list)
+    date_w = draw.textlength(date_text, font=font_list)
+
+    base_x = 12
+    clock_h_approx = 28
+    baseline_y = bar_y0 + (bottom_bar_h - clock_h_approx)//2
+
+    # time
+    draw.text((base_x, baseline_y), clock_text, font=font_clock, fill=CLOCK_COLOR)
+    x = base_x + time_w + 4
+    # separator
+    draw.text((x, baseline_y + 4), sep, font=font_list, fill=CLOCK_COLOR)
+    x += sep_w + 4
+    # date
+    draw.text((x, baseline_y + 4), date_text, font=font_list, fill=CLOCK_COLOR)
+
+# ---- Landscape now-playing layout ----
+def draw_layout_landscape(track, artist, art_url, clock_text, date_text):
     """
     Layout in landscape:
       - Square album art at (0,0) with side 'art_side' derived from ALBUM_ART_SIDE.
       - Right column (auto width) for track & artist, wrapped.
-      - Bottom taskbar (auto height) with clock on the right.
+      - Bottom taskbar (auto height) with clock + date on the left.
     """
     art_side, bottom_bar_h, right_col_w, col_x0 = compute_layout_from_art_side()
 
@@ -166,7 +207,7 @@ def draw_layout_landscape(track, artist, art_url, clock_text):
 
     # --- Album art as square of size art_side ---
     art = Image.open(BytesIO(requests.get(art_url).content)).convert("RGB")
-    # scale so shorter side == art_side, then center-crop
+    # scale so shorter side == art_side, then center-crop to square
     scale = art_side / min(art.width, art.height)
     new_w = int(art.width * scale)
     new_h = int(art.height * scale)
@@ -181,105 +222,91 @@ def draw_layout_landscape(track, artist, art_url, clock_text):
     col_y1 = LANDSCAPE_H - bottom_bar_h
     col_w  = right_col_w
     if col_w > 0 and col_y1 > col_y0:
-        title_lines  = wrap_ellipsis(draw, track,  font_title,  col_w, max_lines=3)
-        artist_lines = wrap_ellipsis(draw, artist, font_artist, col_w, max_lines=2)
+        # Allow more lines for song title (up to 5)
+        title_lines  = wrap_ellipsis(draw, track, font_title, col_w, max_lines=5)
+        # Artist same font but prefixed with "by" and lighter color
+        artist_text  = f"by {artist}"
+        artist_lines = wrap_ellipsis(draw, artist_text, font_artist, col_w, max_lines=2)
 
         cur_y = col_y0 + 8
         for ln in title_lines:
             draw.text((col_x0, cur_y), ln, font=font_title, fill=TITLE_COLOR)
-            cur_y += 30
+            cur_y += 32  # line spacing for big text
         cur_y += 6
         for ln in artist_lines:
             draw.text((col_x0, cur_y), ln, font=font_artist, fill=ARTIST_COLOR)
-            cur_y += 24
+            cur_y += 28
 
-    # --- Divider & taskbar ---
-    bar_y0 = LANDSCAPE_H - bottom_bar_h
-    draw.line([(0, bar_y0 - 1), (LANDSCAPE_W, bar_y0 - 1)], fill=(220,220,220))
-    draw.rectangle([0, bar_y0, LANDSCAPE_W, LANDSCAPE_H], fill=TASKBAR_BG)
-
-    # Clock centered vertically in bar
-    clock_w = draw.textlength(clock_text, font=font_clock)
-    clock_h_approx = 28
-    clock_x = LANDSCAPE_W - clock_w - 12
-    clock_y = bar_y0 + (bottom_bar_h - clock_h_approx)//2
-    draw.text((clock_x, clock_y), clock_text, font=font_clock, fill=CLOCK_COLOR)
+    # --- Taskbar with clock + date ---
+    draw_taskbar(draw, bottom_bar_h, clock_text, date_text)
 
     return img
 
 # ---- Portrait fallback ----
-def draw_now_playing_portrait(track, artist, art_url, clock_text):
+def draw_now_playing_portrait(track, artist, art_url, clock_text, date_text):
     PORTRAIT_W, PORTRAIT_H = 448, 600
     bar_h = 72
 
     img = Image.new("RGB", (PORTRAIT_W, PORTRAIT_H), BG_COLOR)
     draw = ImageDraw.Draw(img)
 
+    # art
     art = Image.open(BytesIO(requests.get(art_url).content)).convert("RGB")
     art = art.resize((448, 448))
     img.paste(art, (0, 0))
 
+    # text area (above bar)
     y0 = 448
     margin = 12
     max_w = PORTRAIT_W - margin*2
-    track_draw  = truncate(draw, track,  font_title,  max_w)
-    artist_draw = truncate(draw, artist, font_artist, max_w)
-    draw.text((margin, y0 + 6), track_draw,  font=font_title,  fill=TITLE_COLOR)
-    draw.text((margin, y0 + 40), artist_draw, font=font_artist, fill=ARTIST_COLOR)
+    title_lines  = wrap_ellipsis(draw, track, font_title,  max_w, max_lines=5)
+    artist_text  = f"by {artist}"
+    artist_lines = wrap_ellipsis(draw, artist_text, font_artist, max_w, max_lines=2)
+    cur_y = y0 + 6
+    for ln in title_lines:
+        draw.text((margin, cur_y), ln, font=font_title, fill=TITLE_COLOR)
+        cur_y += 32
+    cur_y += 4
+    for ln in artist_lines:
+        draw.text((margin, cur_y), ln, font=font_artist, fill=ARTIST_COLOR)
+        cur_y += 28
 
+    # bottom taskbar
     bar_y0 = PORTRAIT_H - bar_h
     draw.rectangle([0, bar_y0, PORTRAIT_W, PORTRAIT_H], fill=TASKBAR_BG)
-    clock_w = draw.textlength(clock_text, font=font_clock)
-    clock_h_approx = 28
-    draw.text(
-        (PORTRAIT_W - clock_w - 10, bar_y0 + (bar_h - clock_h_approx)//2),
-        clock_text,
-        font=font_clock,
-        fill=CLOCK_COLOR
-    )
 
+    time_w = draw.textlength(clock_text, font=font_clock)
+    sep = " | "
+    sep_w = draw.textlength(sep, font=font_list)
+    date_w = draw.textlength(date_text, font=font_list)
+    base_x = 10
+    clock_h_approx = 28
+    baseline_y = bar_y0 + (bar_h - clock_h_approx)//2
+    draw.text((base_x, baseline_y), clock_text, font=font_clock, fill=CLOCK_COLOR)
+    x = base_x + time_w + 4
+    draw.text((x, baseline_y + 4), sep, font=font_list, fill=CLOCK_COLOR)
+    x += sep_w + 4
+    draw.text((x, baseline_y + 4), date_text, font=font_list, fill=CLOCK_COLOR)
+
+    # rotate to panel orientation
     img = img.rotate(90, expand=True)
     return img
 
 # ---- Public draw entrypoints ----
-def draw_now_playing(track, artist, art_url, clock_text):
+def draw_now_playing(track, artist, art_url, clock_text, date_text):
     if ORIENTATION == "portrait":
-        img = draw_now_playing_portrait(track, artist, art_url, clock_text)
+        img = draw_now_playing_portrait(track, artist, art_url, clock_text, date_text)
     else:
-        img = draw_layout_landscape(track, artist, art_url, clock_text)
+        img = draw_layout_landscape(track, artist, art_url, clock_text, date_text)
     display.set_image(maybe_flip(img))
     display.show()
 
-def draw_idle_top_list(top_items, clock_text):
-    if top_items:
-        hero = top_items[0]
-        track = "Top this week"
-        artist = f"{len(top_items)} tracks"
-        art_url = hero["img"]
-        draw_now_playing(track, artist, art_url, clock_text)
-    else:
-        # Just show empty background + clock taskbar
-        _, bottom_bar_h, _, _ = compute_layout_from_art_side()
-        img = Image.new("RGB", (LANDSCAPE_W, LANDSCAPE_H), BG_COLOR)
-        draw = ImageDraw.Draw(img)
-        bar_y0 = LANDSCAPE_H - bottom_bar_h
-        draw.rectangle([0, bar_y0, LANDSCAPE_W, LANDSCAPE_H], fill=TASKBAR_BG)
-        clock_w = draw.textlength(clock_text, font=font_clock)
-        clock_h_approx = 28
-        draw.text(
-            (LANDSCAPE_W - clock_w - 12, bar_y0 + (bottom_bar_h - clock_h_approx)//2),
-            clock_text,
-            font=font_clock,
-            fill=CLOCK_COLOR
-        )
-        display.set_image(maybe_flip(img))
-        display.show()
-
-# ---- Top tracks cache ----
+# ---- Idle / standby: hero + top tracks list ----
 _top_cache = {"ts": 0, "items": None}
+
 def get_top_tracks(limit=7, time_range="short_term"):
     now = time.monotonic()
-    if not _top_cache["items"] or (now - _top_cache["ts"]) > TOP_CACHE_TTL:
+    if (not _top_cache["items"]) or ((now - _top_cache["ts"]) > TOP_CACHE_TTL):
         items = sp.current_user_top_tracks(limit=limit, time_range=time_range).get("items", [])
         _top_cache["items"] = [{
             "id": it["id"],
@@ -290,13 +317,65 @@ def get_top_tracks(limit=7, time_range="short_term"):
         _top_cache["ts"] = now
     return _top_cache["items"]
 
+def draw_idle_top_list(top_items, clock_text, date_text):
+    """
+    Standby layout:
+      - Hero = top track's album art (same art sizing rules).
+      - Right column: 'Top this week' heading + list of tracks.
+      - Bottom bar: clock + date, same as now-playing.
+    """
+    art_side, bottom_bar_h, right_col_w, col_x0 = compute_layout_from_art_side()
+    img = Image.new("RGB", (LANDSCAPE_W, LANDSCAPE_H), BG_COLOR)
+    draw = ImageDraw.Draw(img)
+
+    if not top_items:
+        # Nothing to show: just blank + taskbar
+        draw_taskbar(draw, bottom_bar_h, clock_text, date_text)
+        display.set_image(maybe_flip(img))
+        display.show()
+        return
+
+    hero = top_items[0]
+    art_url = hero["img"]
+
+    # hero art left
+    art = Image.open(BytesIO(requests.get(art_url).content)).convert("RGB")
+    scale = art_side / min(art.width, art.height)
+    new_w = int(art.width * scale)
+    new_h = int(art.height * scale)
+    art = art.resize((new_w, new_h))
+    left = (new_w - art_side) // 2
+    top = (new_h - art_side) // 2
+    art = art.crop((left, top, left + art_side, top + art_side))
+    img.paste(art, (0, 0))
+
+    # right column with heading + list
+    col_y0 = 0
+    col_y1 = LANDSCAPE_H - bottom_bar_h
+    col_w  = right_col_w
+    if col_w > 0 and col_y1 > col_y0:
+        heading = "Top this week"
+        draw.text((col_x0, col_y0 + 8), heading, font=font_header, fill=TITLE_COLOR)
+        list_y = col_y0 + 8 + 24
+        line_h = 22
+        max_lines = max(1, (col_y1 - list_y)//line_h)
+        for i, t in enumerate(top_items[:max_lines]):
+            line = f"{i+1}. {t['name']} — {t['artist']}"
+            line = truncate(draw, line, font_list, col_w)
+            draw.text((col_x0, list_y + i*line_h), line, font=font_list, fill=ARTIST_COLOR)
+
+    # bottom bar
+    draw_taskbar(draw, bottom_bar_h, clock_text, date_text)
+    display.set_image(maybe_flip(img))
+    display.show()
+
 # ---- Main loop ----
-last_track_id      = None
-last_active_ts     = time.monotonic()
-idle_shown         = False
-candidate_id       = None
+last_track_id        = None
+last_active_ts       = time.monotonic()
+idle_shown           = False
+candidate_id         = None
 candidate_first_seen = 0.0
-last_clock_str     = None
+last_idle_draw_ts    = 0.0
 
 print(f"[Init] Panel {PANEL_W}x{PANEL_H} | orientation={ORIENTATION} | ALBUM_ART_SIDE={ALBUM_ART_SIDE}")
 
@@ -304,10 +383,11 @@ while True:
     sleep_s = POLL_ACTIVE
     try:
         current_clock = clock_str_round10()
-        clock_changed = (current_clock != last_clock_str)
+        current_date  = date_str()
 
         current = sp.current_user_playing_track()
         if current and current.get("is_playing") and current.get("item"):
+            # ---- Active playback ----
             tid    = current["item"]["id"]
             track  = current["item"]["name"]
             artist = current["item"]["artists"][0]["name"]
@@ -317,6 +397,7 @@ while True:
             now = time.monotonic()
             last_active_ts = now
 
+            # debounce: require >= DEBOUNCE_MS listened time for a new track
             if candidate_id != tid:
                 candidate_id = tid
                 candidate_first_seen = now - (prog / 1000.0)
@@ -326,33 +407,29 @@ while True:
             if listened_ms >= DEBOUNCE_MS:
                 if tid != last_track_id or idle_shown:
                     should_redraw = True
-                elif clock_changed:
-                    should_redraw = True
 
             if should_redraw:
-                print(f"Now playing: {track} – {artist} | {current_clock}")
-                draw_now_playing(track, artist, arturl, current_clock)
+                print(f"Now playing: {track} – {artist} | {current_clock} {current_date}")
+                draw_now_playing(track, artist, arturl, current_clock, current_date)
                 last_track_id = tid
                 idle_shown = False
-                last_clock_str = current_clock
 
             sleep_s = POLL_ACTIVE
 
         else:
-            idle_for = time.monotonic() - last_active_ts
+            # ---- Idle / standby ----
+            now = time.monotonic()
+            idle_for = now - last_active_ts
             if idle_for >= IDLE_SECS:
-                if clock_changed or not idle_shown:
+                if (not idle_shown) or ((now - last_idle_draw_ts) >= IDLE_REFRESH_SECS):
                     top_items = get_top_tracks(limit=7, time_range="short_term")
-                    print(f"Idle mode | {current_clock}")
-                    draw_idle_top_list(top_items, current_clock)
+                    print(f"Idle mode: top tracks | {current_clock} {current_date}")
+                    draw_idle_top_list(top_items, current_clock, current_date)
                     idle_shown = True
-                    last_clock_str = current_clock
+                    last_idle_draw_ts = now
                 sleep_s = POLL_IDLE
             else:
-                if clock_changed:
-                    top_items = get_top_tracks(limit=7, time_range="short_term")
-                    draw_idle_top_list(top_items, current_clock)
-                    last_clock_str = current_clock
+                # not yet idle → nothing to redraw just for time/date
                 sleep_s = POLL_ACTIVE
 
     except spotipy.SpotifyException as e:
