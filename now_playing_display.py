@@ -223,10 +223,10 @@ def draw_layout_landscape(track, artist, art_url, clock_text, date_text):
     col_w  = right_col_w
     if col_w > 0 and col_y1 > col_y0:
         # Song title: up to 5 lines
-        title_lines  = wrap_ellipsis(draw, track,  font_title,  col_w, max_lines=5)
+        title_lines  = wrap_ellipsis(draw, track,  font_title,  col_w, max_lines=7)
         # Artist: same font, high contrast
         artist_text  = artist
-        artist_lines = wrap_ellipsis(draw, artist_text, font_artist, col_w, max_lines=2)
+        artist_lines = wrap_ellipsis(draw, artist_text, font_artist, col_w, max_lines=4)
 
         cur_y = col_y0 + 8
         for ln in title_lines:
