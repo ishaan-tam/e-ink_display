@@ -344,9 +344,10 @@ def draw_idle_top_list(top_items, clock_text, date_text):
     """
     Standby layout:
       - Hero = top track's album art (same art sizing rules).
-      - Right column: 'Top this week' (big, like song title) + up to 5 tracks.
+      - Right column: 'Top this week' heading (up to 2 lines, big) +
+        up to 5 tracks.
         For each track:
-          - Bold song name
+          - Bold song name (up to 2 lines)
           - Artist on line below, regular weight
           - Vertical spacing between songs (no numbering, no divider lines)
       - Bottom bar: clock + date, same as now-playing.
@@ -383,34 +384,39 @@ def draw_idle_top_list(top_items, clock_text, date_text):
     if col_w > 0 and col_y1 > col_y0:
         y = col_y0 + 8
 
-        # Heading: same font as main music title
+        # Heading: up to 2 lines, same font as main music title
         heading = "Top this week"
-        heading_line_h = 32  # approximate
-        heading_text = truncate(draw, heading, font_title, col_w)
-        draw.text((col_x0, y), heading_text, font=font_title, fill=TITLE_COLOR)
-        y += heading_line_h + 10  # space below heading
+        heading_lines = wrap_ellipsis(draw, heading, font_title, col_w, max_lines=2)
+        heading_line_h = 32  # approximate line height for font_title
+        for ln in heading_lines:
+            draw.text((col_x0, y), ln, font=font_title, fill=TITLE_COLOR)
+            y += heading_line_h
+        y += 8  # extra space below heading block
 
-        # Each song as a block: bold song, regular artist
-        title_line_h   = 30
+        # Each song as a block: bold song (up to 2 lines), artist under it
+        title_line_h   = 30   # per line
         artist_line_h  = 22
         block_spacing  = 10
 
         for t in top_items[:5]:  # only top 5
-            song  = t["name"]
+            song   = t["name"]
             artist = t["artist"]
 
-            song_text   = truncate(draw, song,   font_title, col_w)
-            artist_text = truncate(draw, artist, font_list,  col_w)
+            # Song can wrap up to 2 lines
+            song_lines = wrap_ellipsis(draw, song, font_title, col_w, max_lines=2)
+            artist_text = truncate(draw, artist, font_list, col_w)
 
-            # If there isn't enough vertical space left for another block, break
-            if y + title_line_h + artist_line_h > col_y1:
-                break
+            # Compute required height for this block
+            needed_h = title_line_h * len(song_lines) + artist_line_h + block_spacing
+            if y + needed_h > col_y1:
+                break  # not enough vertical space for another full block
 
-            # Song (bold)
-            draw.text((col_x0, y), song_text, font=font_title, fill=TITLE_COLOR)
-            y += title_line_h
+            # Draw song lines (bold)
+            for ln in song_lines:
+                draw.text((col_x0, y), ln, font=font_title, fill=TITLE_COLOR)
+                y += title_line_h
 
-            # Artist (regular, under song)
+            # Draw artist below (regular)
             draw.text((col_x0, y), artist_text, font=font_list, fill=ARTIST_COLOR)
             y += artist_line_h + block_spacing
 
