@@ -40,7 +40,7 @@ font_header  = ImageFont.truetype(FONT_BOLD, 18)
 font_list    = ImageFont.truetype(FONT_REG, 16)
 
 # ---- Behavior knobs ----
-IDLE_SECS         = 600    # seconds of no playback before entering standby
+IDLE_SECS         = 60    # seconds of no playback before entering standby
 POLL_ACTIVE       = 5
 POLL_IDLE         = 60
 DEBOUNCE_MS       = 3000
@@ -344,7 +344,11 @@ def draw_idle_top_list(top_items, clock_text, date_text):
     """
     Standby layout:
       - Hero = top track's album art (same art sizing rules).
-      - Right column: 'Top this week' heading + list of tracks.
+      - Right column: 'Top this week' (big, like song title) + up to 5 tracks.
+        For each track:
+          - Bold song name
+          - Artist on line below, regular weight
+          - Vertical spacing between songs (no numbering, no divider lines)
       - Bottom bar: clock + date, same as now-playing.
     """
     art_side, bottom_bar_h, right_col_w, col_x0 = compute_layout_from_art_side()
@@ -358,10 +362,9 @@ def draw_idle_top_list(top_items, clock_text, date_text):
         display.show()
         return
 
+    # --- Hero art from top track ---
     hero = top_items[0]
     art_url = hero["img"]
-
-    # hero art left
     art = Image.open(BytesIO(requests.get(art_url).content)).convert("RGB")
     scale = art_side / min(art.width, art.height)
     new_w = int(art.width * scale)
@@ -372,25 +375,50 @@ def draw_idle_top_list(top_items, clock_text, date_text):
     art = art.crop((left, top, left + art_side, top + art_side))
     img.paste(art, (0, 0))
 
-    # right column with heading + list
+    # --- Right column content ---
     col_y0 = 0
     col_y1 = LANDSCAPE_H - bottom_bar_h
     col_w  = right_col_w
-    if col_w > 0 and col_y1 > col_y0:
-        heading = "Top this week"
-        draw.text((col_x0, col_y0 + 8), heading, font=font_header, fill=TITLE_COLOR)
-        list_y = col_y0 + 8 + 24
-        line_h = 22
-        max_lines = max(1, (col_y1 - list_y)//line_h)
-        for i, t in enumerate(top_items[:max_lines]):
-            line = f"{i+1}. {t['name']} — {t['artist']}"
-            line = truncate(draw, line, font_list, col_w)
-            draw.text((col_x0, list_y + i*line_h), line, font=font_list, fill=ARTIST_COLOR)
 
-    # bottom bar
+    if col_w > 0 and col_y1 > col_y0:
+        y = col_y0 + 8
+
+        # Heading: same font as main music title
+        heading = "Top this week"
+        heading_line_h = 32  # approximate
+        heading_text = truncate(draw, heading, font_title, col_w)
+        draw.text((col_x0, y), heading_text, font=font_title, fill=TITLE_COLOR)
+        y += heading_line_h + 10  # space below heading
+
+        # Each song as a block: bold song, regular artist
+        title_line_h   = 30
+        artist_line_h  = 22
+        block_spacing  = 10
+
+        for t in top_items[:5]:  # only top 5
+            song  = t["name"]
+            artist = t["artist"]
+
+            song_text   = truncate(draw, song,   font_title, col_w)
+            artist_text = truncate(draw, artist, font_list,  col_w)
+
+            # If there isn't enough vertical space left for another block, break
+            if y + title_line_h + artist_line_h > col_y1:
+                break
+
+            # Song (bold)
+            draw.text((col_x0, y), song_text, font=font_title, fill=TITLE_COLOR)
+            y += title_line_h
+
+            # Artist (regular, under song)
+            draw.text((col_x0, y), artist_text, font=font_list, fill=ARTIST_COLOR)
+            y += artist_line_h + block_spacing
+
+    # --- Bottom taskbar with time + date ---
     draw_taskbar(draw, bottom_bar_h, clock_text, date_text)
     display.set_image(maybe_flip(img))
     display.show()
+
 
 # ---- Main loop ----
 last_track_id        = None
