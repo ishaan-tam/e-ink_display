@@ -1,0 +1,16 @@
+[Unit]
+Description=Spotify E-ink Display (%i)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=%i
+# %h = home directory of User=%i
+WorkingDirectory=%h/e-ink_display
+ExecStart=%h/e-ink_display/venv/bin/python %h/e-ink_display/now_playing_display.py
+Restart=always
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=multi-user.target
