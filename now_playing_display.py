@@ -1,3 +1,53 @@
+"""
+Spotify E-Ink Display (Landscape/Portrait Adaptive)
+---------------------------------------------------
+
+FEATURES
+--------
+• Shows the currently playing Spotify track:
+    - Large album art
+    - Multi-line song title + artist
+    - High-contrast typography for readability
+    - Auto-rotates between portrait/landscape modes
+    - Clock + date with nearest-10-minute rounding
+    - Only refreshes the screen when necessary to preserve e-ink life
+
+• Idle Mode (after 10 minutes of inactivity):
+    - Hero image = top track’s album art
+    - “Top this week” header (multi-line)
+    - Top 5 tracks displayed as:
+        * Song title (bold, up to 2 lines)
+        * Artist line (regular)
+        * Vertical spacing (clean, no numbering)
+    - Standby refresh capped to once every 30 minutes
+
+• Layout System:
+    - All dimensions derived from a single ALBUM_ART_SIDE variable
+    - Bottom taskbar auto-sizes
+    - Right-column wrapping + truncation logic
+
+• Behavior / Performance:
+    - Debounces track changes (≥3s listened time)
+    - Polling frequency reduces when paused
+    - Top-track API results cached for 6 hours
+    - Avoids unnecessary re-renders to extend panel lifespan
+
+• Service-Friendly:
+    - Designed to run under systemd as “spotify-display.service”
+    - No command-line arguments needed
+    - Orientation and behavior adjustable inside code
+
+FUTURE-PROOFING / EXTENSIBILITY
+-------------------------------
+• QR-based Spotify login (no need to manually enter client secrets)
+• Weather, stocks, and widgets for the taskbar or idle pages
+• NFC-triggered actions: share photos, pair devices, load playlists
+• Web dashboard for settings (font size, themes, orientation)
+• Multiple idle screens (auto-rotating dashboards)
+• Integration with HomeKit, MQTT, or custom REST APIs
+"""
+
+
 import time
 import requests
 from io import BytesIO
@@ -40,7 +90,7 @@ font_header  = ImageFont.truetype(FONT_BOLD, 18)
 font_list    = ImageFont.truetype(FONT_REG, 16)
 
 # ---- Behavior knobs ----
-IDLE_SECS         = 60    # seconds of no playback before entering standby
+IDLE_SECS         = 300    # seconds of no playback before entering standby
 POLL_ACTIVE       = 5
 POLL_IDLE         = 60
 DEBOUNCE_MS       = 3000
