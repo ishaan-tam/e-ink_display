@@ -37,7 +37,7 @@ OUTER_MARGIN = 24
 GRID_GAP = 0
 GRID_COLS = 3
 GRID_ROWS = 3
-GRID_TILE = (CANVAS_W - 2 * OUTER_MARGIN - (GRID_COLS - 1) * GRID_GAP) // GRID_COLS  # 352 px
+GRID_TILE = (CANVAS_W - 2 * OUTER_MARGIN - (GRID_COLS - 1) * GRID_GAP) // GRID_COLS  # 384 px
 GRID_TOP = OUTER_MARGIN
 GRID_HEIGHT = GRID_ROWS * GRID_TILE + (GRID_ROWS - 1) * GRID_GAP
 FOOTER_TOP = GRID_TOP + GRID_HEIGHT + OUTER_MARGIN
@@ -174,15 +174,19 @@ def draw_footer(draw: ImageDraw.ImageDraw, top_tracks):
     col_w = (CANVAS_W - 2 * OUTER_MARGIN - 2 * col_gap) // 3
     block_h = 88
 
-    # 3 columns, 3 entries each: 1-3 | 4-6 | 7-9
-    for col in range(3):
-        col_x = OUTER_MARGIN + col * (col_w + col_gap)
-        for row in range(3):
-            idx = col * 3 + row
+    # Match the album-art grid order visually:
+    # Row 1: 1 2 3
+    # Row 2: 4 5 6
+    # Row 3: 7 8 9
+    for row in range(3):
+        base_y = content_top + row * block_h
+        for col in range(3):
+            idx = row * 3 + col
             if idx >= len(top_tracks):
                 continue
+
             item = top_tracks[idx]
-            base_y = content_top + row * block_h
+            col_x = OUTER_MARGIN + col * (col_w + col_gap)
 
             song_text = truncate(draw, f"{item['rank']}. {item['name']}", font_song, col_w)
             artist_text = truncate(draw, item["artist"], font_artist, col_w)
@@ -194,7 +198,6 @@ def draw_footer(draw: ImageDraw.ImageDraw, top_tracks):
     updated = updated.replace(" 0", " ")
     update_y = CANVAS_H - 34 - 22
     draw.text((OUTER_MARGIN, update_y), updated, font=font_update, fill=SUBTEXT_COLOR)
-
 
 
 def render_top_grid(top_tracks):
