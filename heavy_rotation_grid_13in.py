@@ -5,7 +5,7 @@ Layout:
 - 13.3" Inky / Spectra 6 panel: 1600x1200
 - Internal portrait canvas: 1200x1600
 - Top: 3x3 full-width album-art grid, no gaps
-- Bottom: "HEAVY ROTATION" footer with album, artist, and representative song
+- Bottom: "HEAVY ROTATION" footer with album, artist, and representative top song
 - Data: top unique albums derived/scored from recent Spotify top tracks
 - Intended to run once per day, or manually with --force
 """
@@ -76,7 +76,7 @@ FONT_REG = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
 font_header = ImageFont.truetype(FONT_BOLD, 42)
 font_album = ImageFont.truetype(FONT_BOLD, 23)
 font_artist = ImageFont.truetype(FONT_REG, 21)
-font_via = ImageFont.truetype(FONT_REG, 18)
+font_top = ImageFont.truetype(FONT_REG, 21)      # Same size as artist line for readability
 font_update = ImageFont.truetype(FONT_REG, 20)
 
 
@@ -189,13 +189,17 @@ def get_heavy_rotation_albums(
     Fetch recent top tracks and group them into unique albums.
 
     Scoring:
-    - Track rank 1 gets the most points.
-    - Lower-ranked tracks get fewer points.
+    - Track rank 1 gets track_fetch_limit points.
+    - Track rank 2 gets track_fetch_limit - 1 points.
+    - Track rank 50 gets 1 point when TRACK_FETCH_LIMIT = 50.
     - Multiple tracks from the same album add together.
-    - Representative song = highest-ranked song from that album.
+    - Representative top song = highest-ranked song from that album.
 
-    This keeps the grid visually unique while still reflecting what songs
-    you are actually playing most.
+    Example with TRACK_FETCH_LIMIT = 50:
+    - Rank 2 song from Currents: 49 points
+    - Rank 8 song from Currents: 43 points
+    - Rank 20 song from Currents: 31 points
+    - Currents total score: 123
     """
     response = sp.current_user_top_tracks(limit=track_fetch_limit, time_range=time_range)
     tracks = response.get("items", [])
@@ -223,24 +227,24 @@ def get_heavy_rotation_albums(
                 "img": image_url,
                 "score": 0,
                 "track_count": 0,
-                "best_track": track_name,
-                "best_track_rank": rank,
+                "top_track": track_name,
+                "top_track_rank": rank,
             }
 
         grouped_album = grouped[album_id]
         grouped_album["score"] += points
         grouped_album["track_count"] += 1
 
-        if rank < grouped_album["best_track_rank"]:
-            grouped_album["best_track"] = track_name
-            grouped_album["best_track_rank"] = rank
+        if rank < grouped_album["top_track_rank"]:
+            grouped_album["top_track"] = track_name
+            grouped_album["top_track_rank"] = rank
 
     albums = list(grouped.values())
 
     albums.sort(
         key=lambda a: (
             -a["score"],
-            a["best_track_rank"],
+            a["top_track_rank"],
             a["album_name"].lower(),
         )
     )
@@ -268,7 +272,7 @@ def draw_footer(draw: ImageDraw.ImageDraw, albums: List[dict]):
     - Each item:
         Album
         Artist
-        via: Representative Song
+        top: Representative Song
     """
     y0 = FOOTER_TOP
 
@@ -280,15 +284,15 @@ def draw_footer(draw: ImageDraw.ImageDraw, albums: List[dict]):
 
     subtitle = "albums from recent top tracks"
     subtitle_x = 24 + int(draw.textlength("HEAVY ROTATION", font=font_header)) + 18
-    subtitle_y = title_y + 15
-    draw.text((subtitle_x, subtitle_y), subtitle, font=font_via, fill=MUTED_COLOR)
+    subtitle_y = title_y + 14
+    draw.text((subtitle_x, subtitle_y), subtitle, font=font_top, fill=MUTED_COLOR)
 
     content_top = title_y + 62
 
     col_gap = 18
     side_pad = 24
     col_w = (CANVAS_W - 2 * side_pad - 2 * col_gap) // 3
-    block_h = 91
+    block_h = 96
 
     # Match album-art visual order:
     # Row 1: 1 2 3
@@ -307,11 +311,11 @@ def draw_footer(draw: ImageDraw.ImageDraw, albums: List[dict]):
 
             album_line = truncate(draw, f"{item['rank']}. {item['album_name']}", font_album, col_w)
             artist_line = truncate(draw, item["artist"], font_artist, col_w)
-            via_line = truncate(draw, f"via: {item['best_track']}", font_via, col_w)
+            top_line = truncate(draw, f"top: {item['top_track']}", font_top, col_w)
 
             draw.text((col_x, base_y), album_line, font=font_album, fill=TEXT_COLOR)
             draw.text((col_x, base_y + 29), artist_line, font=font_artist, fill=SUBTEXT_COLOR)
-            draw.text((col_x, base_y + 55), via_line, font=font_via, fill=MUTED_COLOR)
+            draw.text((col_x, base_y + 56), top_line, font=font_top, fill=MUTED_COLOR)
 
     updated = time.strftime("Updated %a, %b %d at %I:%M %p", time.localtime()).replace(" 0", " ")
     draw.text((24, CANVAS_H - 32), updated, font=font_update, fill=MUTED_COLOR)
@@ -376,7 +380,7 @@ def main():
     for a in albums:
         print(
             f"  {a['rank']}. {a['album_name']} — {a['artist']} "
-            f"(via: {a['best_track']}, score={a['score']}, tracks={a['track_count']})"
+            f"(top: {a['top_track']}, score={a['score']}, tracks={a['track_count']})"
         )
 
     portrait_img = render_album_grid(albums)
