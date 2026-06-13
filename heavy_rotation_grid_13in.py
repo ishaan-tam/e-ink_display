@@ -38,7 +38,7 @@ FORCE_REFRESH = "--force" in sys.argv
 # Spotify auth.
 # Best practice: put your secret in an environment variable instead of hardcoding it.
 SPOTIFY_CLIENT_ID = os.getenv("SPOTIFY_CLIENT_ID", "0fabf53d6f5e4d0ba6a71aaca4e4d64b")
-SPOTIFY_CLIENT_SECRET = os.getenv("SPOTIFY_CLIENT_SECRET", "PASTE_YOUR_CLIENT_SECRET_HERE")
+SPOTIFY_CLIENT_SECRET = os.getenv("SPOTIFY_CLIENT_SECRET", "99db601fe5f2497fbf80f0d67f0b5b03")
 SPOTIFY_REDIRECT_URI = "http://127.0.0.1:8888/callback"
 
 # Portrait design canvas; this gets rotated to fit the 1600x1200 panel.
