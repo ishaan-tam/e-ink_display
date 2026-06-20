@@ -52,11 +52,12 @@ from io import BytesIO
 from PIL import Image, ImageDraw, ImageFont
 import spotipy
 from spotipy.oauth2 import SpotifyOAuth
-from inky.auto import auto
+from inky import InkyEL133UF1
 
 # === USER SETTINGS ===
 ORIENTATION   = "portrait"   # "portrait" or "landscape"
-FLIP_180      = True         # True if image appears upside down
+FLIP_180      = False         # True if image appears upside down
+PORTRAIT_ROTATION_DEGREES = 90  # use 270 if portrait appears rotated the wrong way
 
 # Panel size is detected from the Inky driver after display = auto().
 # These are filled in after display initialization so the same file can work
@@ -108,7 +109,7 @@ sp = spotipy.Spotify(auth_manager=SpotifyOAuth(
     open_browser=False
 ))
 
-display = auto()
+display = InkyEL133UF1()
 PANEL_W, PANEL_H = display.resolution  # 13.3" PIM774 should report 1600x1200
 
 def px(value):
@@ -149,6 +150,56 @@ def show_image(img):
         raise ValueError(f"Rendered image is {img.size}, expected {(PANEL_W, PANEL_H)}")
     display.set_image(maybe_flip(img))
     display.show()
+
+
+def rotate_portrait_to_panel(img):
+    """
+    Convert a true portrait canvas (PANEL_H x PANEL_W) into the native
+    landscape buffer size expected by the Inky driver (PANEL_W x PANEL_H).
+    """
+    img = img.rotate(PORTRAIT_ROTATION_DEGREES, expand=True)
+    if img.size != (PANEL_W, PANEL_H):
+        raise ValueError(
+            f"Rotated portrait image is {img.size}, expected {(PANEL_W, PANEL_H)}. "
+            "Try PORTRAIT_ROTATION_DEGREES = 270 instead of 90."
+        )
+    return img
+
+
+def paste_square_art_cover(img, art_url, box):
+    """
+    Download album art, center-crop it square, and paste it to exactly fill box.
+    box = (x0, y0, x1, y1)
+    """
+    x0, y0, x1, y1 = box
+    side = min(x1 - x0, y1 - y0)
+
+    art = Image.open(BytesIO(requests.get(art_url).content)).convert("RGB")
+    scale = side / min(art.width, art.height)
+    new_w = int(art.width * scale)
+    new_h = int(art.height * scale)
+    art = art.resize((new_w, new_h))
+
+    left = (new_w - side) // 2
+    top  = (new_h - side) // 2
+    art = art.crop((left, top, left + side, top + side))
+    img.paste(art, (x0, y0))
+
+
+def draw_portrait_taskbar(draw, portrait_w, portrait_h, bar_h, clock_text, date_text):
+    """Taskbar for true portrait canvas before final rotation."""
+    bar_y0 = portrait_h - bar_h
+    draw.rectangle([0, bar_y0, portrait_w, portrait_h], fill=TASKBAR_BG)
+
+    sep = " | "
+    base_x = px(18)
+    baseline_y = bar_y0 + (bar_h - LINE_CLOCK)//2
+
+    draw.text((base_x, baseline_y), clock_text, font=font_clock, fill=CLOCK_COLOR)
+    x = base_x + draw.textlength(clock_text, font=font_clock) + px(6)
+    draw.text((x, baseline_y), sep, font=font_clock, fill=CLOCK_COLOR)
+    x += draw.textlength(sep, font=font_clock) + px(6)
+    draw.text((x, baseline_y), date_text, font=font_clock, fill=CLOCK_COLOR)
 
 
 # ---- Text helpers ----
@@ -353,64 +404,61 @@ def draw_layout_landscape(track, artist, art_url, clock_text, date_text):
 
 # ---- Portrait fallback ----
 def draw_now_playing_portrait(track, artist, art_url, clock_text, date_text):
-    # Build a portrait canvas, then rotate it so set_image still receives PANEL_W x PANEL_H.
-    PORTRAIT_W, PORTRAIT_H = PANEL_H, PANEL_W
-    bar_h = max(px(60), _MIN_BOTTOM_BAR_H)
+    """
+    True portrait layout:
+    - Album art fills the entire top width as a square (no border/margin)
+    - Text and taskbar live below the square
+    - Final image is rotated only at the end for the native Inky buffer
+    """
+    PORTRAIT_W, PORTRAIT_H = PANEL_H, PANEL_W  # 1200 x 1600 on the 13.3" panel
+    art_side = PORTRAIT_W                    # full-width square at the top
+    bar_h = max(px(44), _MIN_BOTTOM_BAR_H)
 
     img = Image.new("RGB", (PORTRAIT_W, PORTRAIT_H), BG_COLOR)
     draw = ImageDraw.Draw(img)
 
-    art_side = min(PORTRAIT_W, PORTRAIT_H - bar_h - px(140))
-    art = Image.open(BytesIO(requests.get(art_url).content)).convert("RGB")
-    scale = art_side / min(art.width, art.height)
-    new_w = int(art.width * scale)
-    new_h = int(art.height * scale)
-    art = art.resize((new_w, new_h))
-    left = (new_w - art_side) // 2
-    top  = (new_h - art_side) // 2
-    art = art.crop((left, top, left + art_side, top + art_side))
-    img.paste(art, ((PORTRAIT_W - art_side) // 2, 0))
+    # Album art: 0 border, full top square
+    paste_square_art_cover(img, art_url, (0, 0, PORTRAIT_W, art_side))
 
-    y0 = art_side + px(8)
-    margin = px(12)
-    max_w = PORTRAIT_W - margin*2
+    # Text area below album art
+    margin = px(22)
+    text_y0 = art_side + px(10)
+    text_y1 = PORTRAIT_H - bar_h - px(8)
+    max_w = PORTRAIT_W - margin * 2
 
-    title_lines  = wrap_ellipsis(draw, track,  font_title,  max_w, max_lines=5)
-    artist_lines = wrap_ellipsis(draw, artist, font_artist, max_w, max_lines=2)
+    # Slightly smaller portrait fonts so the bottom area does not feel cramped.
+    p_font_title  = ImageFont.truetype(FONT_BOLD, px(24))
+    p_font_artist = ImageFont.truetype(FONT_BOLD, px(19))
+    p_line_title  = px(29)
+    p_line_artist = px(23)
 
-    cur_y = y0 + px(6)
+    title_lines  = wrap_ellipsis(draw, track,  p_font_title,  max_w, max_lines=2)
+    artist_lines = wrap_ellipsis(draw, artist, p_font_artist, max_w, max_lines=1)
+
+    cur_y = text_y0
     for ln in title_lines:
-        draw.text((margin, cur_y), ln, font=font_title, fill=TITLE_COLOR)
-        cur_y += LINE_TITLE
+        if cur_y + p_line_title > text_y1:
+            break
+        draw.text((margin, cur_y), ln, font=p_font_title, fill=TITLE_COLOR)
+        cur_y += p_line_title
 
-    if title_lines and artist_lines:
-        sep_y = cur_y + px(4)
-        line_w = int(max_w * 0.5)
+    if title_lines and artist_lines and cur_y + px(10) < text_y1:
+        sep_y = cur_y + px(5)
+        line_w = int(max_w * 0.42)
         line_x0 = margin + (max_w - line_w)//2
         line_x1 = line_x0 + line_w
         draw.line([(line_x0, sep_y), (line_x1, sep_y)], fill=(60, 60, 60), width=px(2))
-        cur_y = sep_y + px(8)
-    else:
-        cur_y += px(4)
+        cur_y = sep_y + px(10)
 
     for ln in artist_lines:
-        draw.text((margin, cur_y), ln, font=font_artist, fill=ARTIST_COLOR)
-        cur_y += LINE_ARTIST
+        if cur_y + p_line_artist > text_y1:
+            break
+        draw.text((margin, cur_y), ln, font=p_font_artist, fill=ARTIST_COLOR)
+        cur_y += p_line_artist
 
-    # taskbar
-    bar_y0 = PORTRAIT_H - bar_h
-    draw.rectangle([0, bar_y0, PORTRAIT_W, PORTRAIT_H], fill=TASKBAR_BG)
-    sep = " | "
-    base_x = px(10)
-    baseline_y = bar_y0 + (bar_h - LINE_CLOCK)//2
-    draw.text((base_x, baseline_y), clock_text, font=font_clock, fill=CLOCK_COLOR)
-    x = base_x + draw.textlength(clock_text, font=font_clock) + px(6)
-    draw.text((x, baseline_y), sep, font=font_clock, fill=CLOCK_COLOR)
-    x += draw.textlength(sep, font=font_clock) + px(6)
-    draw.text((x, baseline_y), date_text, font=font_clock, fill=CLOCK_COLOR)
+    draw_portrait_taskbar(draw, PORTRAIT_W, PORTRAIT_H, bar_h, clock_text, date_text)
+    return rotate_portrait_to_panel(img)
 
-    img = img.rotate(90, expand=True)
-    return img
 
 # ---- Public draw entrypoints ----
 def draw_now_playing(track, artist, art_url, clock_text, date_text):
@@ -436,7 +484,7 @@ def get_top_tracks(limit=7, time_range="short_term"):
         _top_cache["ts"] = now
     return _top_cache["items"]
 
-def draw_idle_top_list(top_items, clock_text, date_text):
+def draw_idle_top_list_landscape(top_items, clock_text, date_text):
     art_side, bottom_bar_h, right_col_w, col_x0 = compute_layout_from_art_side()
     img = Image.new("RGB", (LANDSCAPE_W, LANDSCAPE_H), BG_COLOR)
     draw = ImageDraw.Draw(img)
@@ -496,6 +544,63 @@ def draw_idle_top_list(top_items, clock_text, date_text):
 
     draw_taskbar(draw, bottom_bar_h, clock_text, date_text)
     show_image(img)
+
+
+def draw_idle_top_list_portrait(top_items, clock_text, date_text):
+    """
+    Portrait idle layout:
+    - Top track album art fills the complete top square
+    - Compact top-track list fits below the square
+    """
+    PORTRAIT_W, PORTRAIT_H = PANEL_H, PANEL_W
+    art_side = PORTRAIT_W
+    bar_h = max(px(38), _MIN_BOTTOM_BAR_H)
+
+    img = Image.new("RGB", (PORTRAIT_W, PORTRAIT_H), BG_COLOR)
+    draw = ImageDraw.Draw(img)
+
+    if top_items:
+        hero = top_items[0]
+        paste_square_art_cover(img, hero["img"], (0, 0, PORTRAIT_W, art_side))
+
+    margin = px(22)
+    max_w = PORTRAIT_W - margin * 2
+    y = art_side + px(8)
+    y_limit = PORTRAIT_H - bar_h - px(6)
+
+    p_font_heading = ImageFont.truetype(FONT_BOLD, px(20))
+    p_font_line    = ImageFont.truetype(FONT_BOLD, px(15))
+    p_line_heading = px(24)
+    p_line         = px(20)
+
+    heading = "Top this week"
+    if y + p_line_heading <= y_limit:
+        draw.text((margin, y), heading, font=p_font_heading, fill=TITLE_COLOR)
+        y += p_line_heading + px(4)
+
+    # Full-width art leaves a compact text area, so use one line per track.
+    for t in (top_items or [])[:4]:
+        song = t["name"]
+        artist = t["artist"]
+        line = f"{song} — {artist}" if artist else song
+        line = truncate(draw, line, p_font_line, max_w)
+
+        if y + p_line > y_limit:
+            break
+
+        draw.text((margin, y), line, font=p_font_line, fill=TITLE_COLOR)
+        y += p_line
+
+    draw_portrait_taskbar(draw, PORTRAIT_W, PORTRAIT_H, bar_h, clock_text, date_text)
+    show_image(rotate_portrait_to_panel(img))
+
+
+def draw_idle_top_list(top_items, clock_text, date_text):
+    if ORIENTATION == "portrait":
+        draw_idle_top_list_portrait(top_items, clock_text, date_text)
+    else:
+        draw_idle_top_list_landscape(top_items, clock_text, date_text)
+
 
 # ---- Main loop ----
 last_track_id        = None
