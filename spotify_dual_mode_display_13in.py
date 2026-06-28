@@ -379,18 +379,16 @@ def draw_layout_landscape(track: str, artist: str, art_url: str, clock_text: str
             draw.text((col_x0, cur_y), ln, font=font_artist, fill=ARTIST_COLOR)
             cur_y += LINE_ARTIST
 
-    draw_taskbar(draw, bottom_bar_h, clock_text, date_text)
     return img
 
 
 def draw_now_playing_portrait(track: str, artist: str, art_url: str, clock_text: str, date_text: str) -> Image.Image:
     PORTRAIT_W, PORTRAIT_H = PANEL_H, PANEL_W
-    bar_h = max(px(60), _MIN_BOTTOM_BAR_H)
 
     img = Image.new("RGB", (PORTRAIT_W, PORTRAIT_H), BG_COLOR)
     draw = ImageDraw.Draw(img)
 
-    art_side = min(PORTRAIT_W, PORTRAIT_H - bar_h - px(44))
+    art_side = min(PORTRAIT_W, PORTRAIT_H - px(44))
     art = load_album_art(art_url, art_side)
     img.paste(art, (0, 0))
 
@@ -419,17 +417,6 @@ def draw_now_playing_portrait(track: str, artist: str, art_url: str, clock_text:
     for ln in artist_lines:
         draw.text((margin, cur_y), ln, font=font_artist, fill=ARTIST_COLOR)
         cur_y += LINE_ARTIST + px(2)
-
-    bar_y0 = PORTRAIT_H - bar_h
-    draw.rectangle([0, bar_y0, PORTRAIT_W, PORTRAIT_H], fill=TASKBAR_BG)
-    sep = " | "
-    base_x = px(10)
-    baseline_y = bar_y0 + (bar_h - LINE_CLOCK) // 2
-    draw.text((base_x, baseline_y), clock_text, font=font_clock, fill=CLOCK_COLOR)
-    x = base_x + draw.textlength(clock_text, font=font_clock) + px(6)
-    draw.text((x, baseline_y), sep, font=font_clock, fill=CLOCK_COLOR)
-    x += draw.textlength(sep, font=font_clock) + px(6)
-    draw.text((x, baseline_y), date_text, font=font_clock, fill=CLOCK_COLOR)
 
     return img.rotate(90, expand=True)
 
