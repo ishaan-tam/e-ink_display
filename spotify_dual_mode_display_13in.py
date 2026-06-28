@@ -26,7 +26,7 @@ from inky.auto import auto
 
 ORIENTATION = "portrait"  # "portrait" or "landscape"
 FLIP_180 = False
-DISPLAY_ROTATION = 180
+DISPLAY_ROTATION = 180  # 0, 90, 180, or 270 for the final panel orientation
 
 # Now-playing behavior knobs
 IDLE_SECS = 300
@@ -412,6 +412,10 @@ def draw_now_playing(track: str, artist: str, art_url: str, clock_text: str, dat
         img = draw_now_playing_portrait(track, artist, art_url, clock_text, date_text)
     else:
         img = draw_layout_landscape(track, artist, art_url, clock_text, date_text)
+
+    if DISPLAY_ROTATION:
+        img = img.rotate(DISPLAY_ROTATION, expand=True)
+
     show_image(img)
 
 
