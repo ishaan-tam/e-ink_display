@@ -287,23 +287,6 @@ def compute_layout_from_art_side() -> tuple[int, int, int, int]:
     return art_side, bottom_bar_h, right_col_w, col_x0
 
 
-def draw_taskbar(draw: ImageDraw.ImageDraw, bottom_bar_h: int, clock_text: str, date_text: str) -> None:
-    bar_y0 = LANDSCAPE_H - bottom_bar_h
-    draw.line([(0, bar_y0 - 1), (LANDSCAPE_W, bar_y0 - 1)], fill=(220, 220, 220))
-    draw.rectangle([0, bar_y0, LANDSCAPE_W, LANDSCAPE_H], fill=TASKBAR_BG)
-
-    sep = " | "
-    base_x = px(12)
-    clock_h_approx = LINE_CLOCK
-    baseline_y = bar_y0 + (bottom_bar_h - clock_h_approx) // 2
-
-    draw.text((base_x, baseline_y), clock_text, font=font_clock, fill=CLOCK_COLOR)
-    x = base_x + draw.textlength(clock_text, font=font_clock) + px(6)
-    draw.text((x, baseline_y), sep, font=font_clock, fill=CLOCK_COLOR)
-    x += draw.textlength(sep, font=font_clock) + px(6)
-    draw.text((x, baseline_y), date_text, font=font_clock, fill=CLOCK_COLOR)
-
-
 def load_album_art(url: str, size: int) -> Image.Image:
     """Download album art, cache it locally, and return a square resized image."""
     cache_path = ART_CACHE_DIR / f"{abs(hash(url))}_{size}.jpg"
@@ -354,7 +337,7 @@ def draw_layout_landscape(track: str, artist: str, art_url: str, clock_text: str
     img.paste(art, (0, 0))
 
     col_y0 = 0
-    col_y1 = LANDSCAPE_H - bottom_bar_h
+    col_y1 = LANDSCAPE_H
     col_w = right_col_w
     if col_w > 0 and col_y1 > col_y0:
         title_lines = wrap_ellipsis(draw, track, font_title, col_w, max_lines=7)
