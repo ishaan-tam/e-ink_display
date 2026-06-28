@@ -26,7 +26,7 @@ from inky.auto import auto
 
 ORIENTATION = "portrait"  # "portrait" or "landscape"
 FLIP_180 = False
-DISPLAY_ROTATION = 270
+DISPLAY_ROTATION = 90
 
 # Now-playing behavior knobs
 IDLE_SECS = 300
