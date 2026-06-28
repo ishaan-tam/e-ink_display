@@ -11,6 +11,7 @@ import os
 import sys
 import time
 from io import BytesIO
+from pathlib import Path
 from typing import Dict, List
 
 import requests
@@ -40,6 +41,8 @@ TRACK_FETCH_LIMIT = 50
 ALBUM_LIMIT = 9
 FORCE_REFRESH = "--force" in sys.argv
 HEAVY_ROTATION_REFRESH_SECS = 1800
+ART_CACHE_DIR = Path("/home/ishaan/.cache/spotify_eink")
+ART_CACHE_TTL_SECS = 6 * 60 * 60
 
 # Spotify auth
 SPOTIFY_CLIENT_ID = os.getenv("SPOTIFY_CLIENT_ID", "0fabf53d6f5e4d0ba6a71aaca4e4d64b")
@@ -60,15 +63,12 @@ LAYOUT_SCALE = 1.0
 BG_COLOR = (255, 255, 255)
 TASKBAR_BG = (0, 0, 0)
 CLOCK_COLOR = (255, 255, 255)
-TITLE_COLOR = (0, 0, 0)
-ARTIST_COLOR = (0, 0, 0)
-
-# Heavy-rotation colors
-HEAVY_BG_COLOR = (255, 255, 255)
-HEAVY_TEXT_COLOR = (0, 0, 0)
-HEAVY_SUBTEXT_COLOR = (60, 60, 60)
-HEAVY_MUTED_COLOR = (95, 95, 95)
-HEAVY_DIVIDER_COLOR = (180, 180, 180)
+TEXT_COLOR = (0, 0, 0)
+SUBTEXT_COLOR = (60, 60, 60)
+MUTED_COLOR = (95, 95, 95)
+DIVIDER_COLOR = (180, 180, 180)
+TITLE_COLOR = TEXT_COLOR
+ARTIST_COLOR = TEXT_COLOR
 
 # Fonts
 FONT_BOLD = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
@@ -108,6 +108,7 @@ sp = spotipy.Spotify(auth_manager=SpotifyOAuth(
 display = auto()
 PANEL_W, PANEL_H = display.resolution
 LAYOUT_SCALE = min(PANEL_W / BASE_LAYOUT_W, PANEL_H / BASE_LAYOUT_H)
+ART_CACHE_DIR.mkdir(parents=True, exist_ok=True)
 LANDSCAPE_W, LANDSCAPE_H = PANEL_W, PANEL_H
 ALBUM_ART_SIDE = px(BASE_ALBUM_ART_SIDE)
 _MIN_BOTTOM_BAR_H = px(36)
@@ -303,6 +304,39 @@ def draw_taskbar(draw: ImageDraw.ImageDraw, bottom_bar_h: int, clock_text: str, 
     draw.text((x, baseline_y), date_text, font=font_clock, fill=CLOCK_COLOR)
 
 
+def load_album_art(url: str, size: int) -> Image.Image:
+    """Download album art, cache it locally, and return a square resized image."""
+    cache_path = ART_CACHE_DIR / f"{abs(hash(url))}_{size}.jpg"
+    if cache_path.exists():
+        try:
+            if time.time() - cache_path.stat().st_mtime < ART_CACHE_TTL_SECS:
+                return Image.open(cache_path).convert("RGB").resize((size, size))
+        except Exception:
+            pass
+
+    try:
+        resp = requests.get(url, timeout=25)
+        resp.raise_for_status()
+        art = Image.open(BytesIO(resp.content)).convert("RGB")
+    except Exception:
+        art = Image.new("RGB", (size, size), (230, 230, 230))
+
+    scale = size / min(art.width, art.height)
+    new_w = int(art.width * scale)
+    new_h = int(art.height * scale)
+    art = art.resize((new_w, new_h))
+    left = (new_w - size) // 2
+    top = (new_h - size) // 2
+    art = art.crop((left, top, left + size, top + size))
+
+    try:
+        art.save(cache_path)
+    except Exception:
+        pass
+
+    return art
+
+
 def draw_layout_landscape(track: str, artist: str, art_url: str, clock_text: str, date_text: str) -> Image.Image:
     art_side, bottom_bar_h, right_col_w, col_x0 = compute_layout_from_art_side()
 
@@ -356,28 +390,21 @@ def draw_now_playing_portrait(track: str, artist: str, art_url: str, clock_text:
     img = Image.new("RGB", (PORTRAIT_W, PORTRAIT_H), BG_COLOR)
     draw = ImageDraw.Draw(img)
 
-    art_side = min(PORTRAIT_W, PORTRAIT_H - bar_h - px(140))
-    art = Image.open(BytesIO(requests.get(art_url, timeout=25).content)).convert("RGB")
-    scale = art_side / min(art.width, art.height)
-    new_w = int(art.width * scale)
-    new_h = int(art.height * scale)
-    art = art.resize((new_w, new_h))
-    left = (new_w - art_side) // 2
-    top = (new_h - art_side) // 2
-    art = art.crop((left, top, left + art_side, top + art_side))
-    img.paste(art, ((PORTRAIT_W - art_side) // 2, 0))
+    art_side = min(PORTRAIT_W, PORTRAIT_H - bar_h - px(44))
+    art = load_album_art(art_url, art_side)
+    img.paste(art, (0, 0))
 
-    y0 = art_side + px(8)
-    margin = px(12)
+    y0 = art_side + px(10)
+    margin = px(16)
     max_w = PORTRAIT_W - margin * 2
 
     title_lines = wrap_ellipsis(draw, track, font_title, max_w, max_lines=5)
     artist_lines = wrap_ellipsis(draw, artist, font_artist, max_w, max_lines=2)
 
-    cur_y = y0 + px(6)
+    cur_y = y0 + px(8)
     for ln in title_lines:
         draw.text((margin, cur_y), ln, font=font_title, fill=TITLE_COLOR)
-        cur_y += LINE_TITLE
+        cur_y += LINE_TITLE + px(2)
 
     if title_lines and artist_lines:
         sep_y = cur_y + px(4)
@@ -387,11 +414,11 @@ def draw_now_playing_portrait(track: str, artist: str, art_url: str, clock_text:
         draw.line([(line_x0, sep_y), (line_x1, sep_y)], fill=(60, 60, 60), width=px(2))
         cur_y = sep_y + px(8)
     else:
-        cur_y += px(4)
+        cur_y += px(6)
 
     for ln in artist_lines:
         draw.text((margin, cur_y), ln, font=font_artist, fill=ARTIST_COLOR)
-        cur_y += LINE_ARTIST
+        cur_y += LINE_ARTIST + px(2)
 
     bar_y0 = PORTRAIT_H - bar_h
     draw.rectangle([0, bar_y0, PORTRAIT_W, PORTRAIT_H], fill=TASKBAR_BG)
@@ -524,7 +551,7 @@ def draw_heavy_rotation_idle(clock_text: str, date_text: str) -> None:
     if not albums:
         return
 
-    img = Image.new("RGB", (CANVAS_W, CANVAS_H), HEAVY_BG_COLOR)
+    img = Image.new("RGB", (CANVAS_W, CANVAS_H), BG_COLOR)
     draw = ImageDraw.Draw(img)
 
     for idx, item in enumerate(albums[:GRID_COLS * GRID_ROWS]):
@@ -540,19 +567,19 @@ def draw_heavy_rotation_idle(clock_text: str, date_text: str) -> None:
             art_draw = ImageDraw.Draw(art)
             placeholder = "No Art"
             tw = art_draw.textlength(placeholder, font=heavy_font_album)
-            art_draw.text(((GRID_TILE - tw) / 2, GRID_TILE / 2 - 14), placeholder, font=heavy_font_album, fill=HEAVY_TEXT_COLOR)
+            art_draw.text(((GRID_TILE - tw) / 2, GRID_TILE / 2 - 14), placeholder, font=heavy_font_album, fill=TEXT_COLOR)
 
         img.paste(art, (x, y))
 
     y0 = FOOTER_TOP
-    draw.line([(0, y0), (CANVAS_W, y0)], fill=HEAVY_DIVIDER_COLOR, width=2)
+    draw.line([(0, y0), (CANVAS_W, y0)], fill=DIVIDER_COLOR, width=2)
 
     title_y = y0 + 14
-    draw.text((24, title_y), "HEAVY ROTATION", font=heavy_font_header, fill=HEAVY_TEXT_COLOR)
+    draw.text((24, title_y), "HEAVY ROTATION", font=heavy_font_header, fill=TEXT_COLOR)
     subtitle = "albums from recent top tracks"
     subtitle_x = 24 + int(draw.textlength("HEAVY ROTATION", font=heavy_font_header)) + 18
     subtitle_y = title_y + 14
-    draw.text((subtitle_x, subtitle_y), subtitle, font=heavy_font_top, fill=HEAVY_MUTED_COLOR)
+    draw.text((subtitle_x, subtitle_y), subtitle, font=heavy_font_top, fill=MUTED_COLOR)
 
     content_top = title_y + 62
     col_gap = 18
@@ -571,12 +598,12 @@ def draw_heavy_rotation_idle(clock_text: str, date_text: str) -> None:
             album_line = truncate(draw, f"{item['rank']}. {item['album_name']}", heavy_font_album, col_w)
             artist_line = truncate(draw, item["artist"], heavy_font_artist, col_w)
             top_line = truncate(draw, f"top: {item['top_track']}", heavy_font_top, col_w)
-            draw.text((col_x, base_y), album_line, font=heavy_font_album, fill=HEAVY_TEXT_COLOR)
-            draw.text((col_x, base_y + 29), artist_line, font=heavy_font_artist, fill=HEAVY_SUBTEXT_COLOR)
-            draw.text((col_x, base_y + 56), top_line, font=heavy_font_top, fill=HEAVY_MUTED_COLOR)
+            draw.text((col_x, base_y), album_line, font=heavy_font_album, fill=TEXT_COLOR)
+            draw.text((col_x, base_y + 29), artist_line, font=heavy_font_artist, fill=SUBTEXT_COLOR)
+            draw.text((col_x, base_y + 56), top_line, font=heavy_font_top, fill=MUTED_COLOR)
 
     updated = time.strftime("Updated %a, %b %d at %I:%M %p", time.localtime()).replace(" 0", " ")
-    draw.text((24, CANVAS_H - 32), updated, font=heavy_font_update, fill=HEAVY_MUTED_COLOR)
+    draw.text((24, CANVAS_H - 32), updated, font=heavy_font_update, fill=MUTED_COLOR)
 
     display_img = img.rotate(DISPLAY_ROTATION, expand=True)
     display_img = maybe_flip(display_img)
@@ -598,7 +625,8 @@ candidate_id = None
 candidate_first_seen = 0.0
 last_idle_draw_ts = 0.0
 
-print(f"[Init] Panel {PANEL_W}x{PANEL_H} | orientation={ORIENTATION} | scale={LAYOUT_SCALE:.2f} | ALBUM_ART_SIDE={ALBUM_ART_SIDE}")
+print(f"[Init] Panel {PANEL_W}x{PANEL_H} | orientation={ORIENTATION} | rotation={DISPLAY_ROTATION} | scale={LAYOUT_SCALE:.2f} | ALBUM_ART_SIDE={ALBUM_ART_SIDE}")
+print(f"[Init] Art cache: {ART_CACHE_DIR}")
 
 while True:
     sleep_s = POLL_ACTIVE
