@@ -24,7 +24,7 @@ from inky.auto import auto
 # USER SETTINGS
 # ============================================================
 
-ORIENTATION = "landscape"  # "portrait" or "landscape"
+ORIENTATION = "portrait"  # "portrait" or "landscape"
 FLIP_180 = False
 DISPLAY_ROTATION = 270
 
