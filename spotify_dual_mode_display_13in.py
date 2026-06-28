@@ -81,6 +81,12 @@ LINE_TITLE = LINE_ARTIST = LINE_CLOCK = LINE_LIST = BLOCK_SPACING = None
 # Heavy-rotation fonts
 heavy_font_header = heavy_font_album = heavy_font_artist = heavy_font_top = heavy_font_update = None
 
+
+def px(value: int) -> int:
+    """Scale a layout pixel value to the detected panel size."""
+    return max(1, int(round(value * LAYOUT_SCALE)))
+
+
 # ============================================================
 # SPOTIFY + DISPLAY INIT
 # ============================================================
@@ -128,11 +134,6 @@ heavy_font_update = ImageFont.truetype(FONT_REG, 20)
 # ============================================================
 # HELPERS
 # ============================================================
-
-def px(value: int) -> int:
-    """Scale a layout pixel value to the detected panel size."""
-    return max(1, int(round(value * LAYOUT_SCALE)))
-
 
 def maybe_flip(img: Image.Image) -> Image.Image:
     return img.rotate(180) if FLIP_180 else img
