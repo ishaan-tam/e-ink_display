@@ -55,8 +55,8 @@ from spotipy.oauth2 import SpotifyOAuth
 from inky.auto import auto
 
 # === USER SETTINGS ===
-ORIENTATION   = "landscape"   # "portrait" or "landscape"
-FLIP_180      = False         # True if image appears upside down
+ORIENTATION   = "portrait"   # "portrait" or "landscape"
+FLIP_180      = True         # True if image appears upside down
 
 # Panel size is detected from the Inky driver after display = auto().
 # These are filled in after display initialization so the same file can work
