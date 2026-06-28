@@ -30,7 +30,7 @@ FLIP_180 = False
 DISPLAY_ROTATION = 180  # 0, 90, 180, or 270 for the final panel orientation
 
 # Now-playing behavior knobs
-IDLE_SECS = 3
+IDLE_SECS = 300
 POLL_ACTIVE = 5
 POLL_IDLE = 60
 DEBOUNCE_MS = 3000
