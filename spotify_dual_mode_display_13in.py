@@ -30,9 +30,9 @@ FLIP_180 = False
 DISPLAY_ROTATION = 180  # 0, 90, 180, or 270 for the final panel orientation
 
 # Now-playing behavior knobs
-IDLE_SECS = 300
+IDLE_SECS = 60
 POLL_ACTIVE = 5
-POLL_IDLE = 60
+POLL_IDLE = 15
 DEBOUNCE_MS = 3000
 
 # Heavy-rotation idle behavior knobs
@@ -633,7 +633,8 @@ while True:
         else:
             now = time.monotonic()
             idle_for = now - last_active_ts
-            if (not idle_shown) or ((now - last_idle_draw_ts) >= HEAVY_ROTATION_REFRESH_SECS):
+            should_show_idle = (not idle_shown) or ((now - last_idle_draw_ts) >= HEAVY_ROTATION_REFRESH_SECS)
+            if idle_for >= IDLE_SECS and should_show_idle:
                 print(f"Idle mode: heavy rotation | {current_clock} {current_date}")
                 draw_heavy_rotation_idle(current_clock, current_date)
                 idle_shown = True
