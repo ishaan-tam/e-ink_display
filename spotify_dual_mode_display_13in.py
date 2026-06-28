@@ -589,9 +589,6 @@ def draw_heavy_rotation_idle(clock_text: str, date_text: str) -> None:
             draw.text((col_x, base_y + 29), artist_line, font=heavy_font_artist, fill=SUBTEXT_COLOR)
             draw.text((col_x, base_y + 56), top_line, font=heavy_font_top, fill=MUTED_COLOR)
 
-    updated = time.strftime("Updated %a, %b %d at %I:%M %p", time.localtime()).replace(" 0", " ")
-    draw.text((24, CANVAS_H - 32), updated, font=heavy_font_update, fill=MUTED_COLOR)
-
     display_img = img.rotate(DISPLAY_ROTATION, expand=True)
     display_img = maybe_flip(display_img)
     if display_img.size != display.resolution:
