@@ -1,0 +1,20 @@
+[Unit]
+Description=Spotify E-Ink Display Service
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ishaan
+WorkingDirectory=/home/ishaan/e-ink_display
+ExecStart=/usr/bin/python3 /home/ishaan/e-ink_display/spotify_dual_mode_display_13in.py
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+# Optional: Increase nice level to ensure display updates aren't starved
+Nice=-5
+
+[Install]
+WantedBy=multi-user.target
